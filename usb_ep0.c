@@ -158,8 +158,8 @@ void ep0_int_hndlr( void )
 		common_write_preamble();
 	}
 	else {
-		// If ep0 is idle back to hub port if required
-		if (switch_to_port_delayed == 0) {
+		// If ep0 is idle state, process port change
+		if (switch_to_port_delayed >= 0) {
 			//printk( "[%lu]sm\n", (jiffies-start_time)*10);
 			state_machine_timeout(0);
 		}
@@ -515,9 +515,6 @@ unknown:
 					/* Delay switching the port because we first need to response
 									to this request with the proper address */
 					set_cs_bits( UDCCS0_DE | UDCCS0_SO );
-					if (switch_to_port_delayed >= 0) {
-						SET_TIMER (0);
-					}
 					break;
 				}					
 				break;
@@ -1038,7 +1035,6 @@ static void get_device_descriptor(usb_dev_request_t * pReq) {
 				memcpy(desc_buf, port4_config_desc_3, value);
 				if (pReq->wLength > 8) {
 					machine_state = DEVICE4_READY;
-					printk( "[%lu]d4\n", (jiffies-start_time)*10);
 					switch_to_port_delayed = 0;
 				}
 			}
