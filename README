@@ -11,6 +11,9 @@ What's needed
 
 Warning
 -I take no responsability if your iPAQ get bricked.
--There is no dual boot capability, although it is posible to reinstall WindowsCE
+-There is no dual boot capability, although it is posible to reinstall WindowsCE.
+
+Developers:
+1. Toolchain (2.95.3) and howto can be found here http://ftp.arm.linux.org.uk/pub/armlinux/toolchain/
 
 
