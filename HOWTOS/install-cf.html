@@ -1,0 +1,73 @@
+<?
+require 'familiar.inc';
+hh_opt('rcsid', '$Id: install-cf.html,v 1.1 2006/08/19 23:25:07 rw Exp $');
+hh_header('Installing Familiar 0.8.4 from CompactFlash'); ?>
+    
+<h2>Bootloader GUI (h3600, h3700, h3800 and h3900)</h2>
+	<ol>
+      <li> 
+	Copy <code>reflash.ctl</code>, <code>md5sums</code> and the
+	appropriate <code>jffs2</code> files to the root directory of
+	the CF card.  The CF card should have a vfat filesystem. Almost all cards
+	come pre-formatted with a vfat filesystem.
+      </li>
+      <li>
+      Insert the CF card into the iPAQ.  (If you are using a dual-CF sleeve,
+      the card must be in the first slot.)
+      </li>
+      <li>
+      Hold down the joypad and push the reset button on the iPAQ.  You will need
+      to remove it from the cradle to access the reset button.
+      </li>
+      <li>
+	When the bootloader splash screen appears, release the joypad.
+	         <br><img src="bootldr-splash.png"><br>
+      </li>
+      <li>
+	Check the version number on the splash screen.  If it is lower
+	than 2.21.12, or there is no version number at all, you should
+	<a href="upgrade-bootldr.html">upgrade the bootloader</a> before proceeding.
+      </li>
+      <li>
+	Push the record button on the side of the iPAQ.  After a short
+	pause, you will be offered a menu of images and invited to
+	select one.  Move the highlight using the joypad, then press
+	the centre of the joypad to select the desired item.
+      </li>
+      <li>
+	Press the record button again when prompted to do so.
+      </li>
+      <li>
+	Wait patiently.  The flashing process will take a few minutes.
+      </li>
+      <li>
+	When installation is complete, reset the machine by pressing
+	the action button (centre of the joypad) again.
+      </li>
+    </ol>
+
+<h2>Bootloader console (h5400, h5500)</h2>
+
+<p>As the bootloader doesn't currently support the screen on the h5400/h5500,
+you will need to use the serial console to flash your iPAQ from CF. Connect to the bootldr
+serial console as described in the <a href="install-serial.html">serial installation instructions</a>, 
+but instead of <code>load root</code>, do the following:</p>
+
+<ol>
+	<LI>Insert your CF card</LI>
+	<li>Load the jffs2 image into the root by entering the following bootloader command (replacing <code><i>filename.jffs2</i></code> with the name of the jffs2 image file on the card):
+<pre>
+copy hda1:<i>filename.jffs2</i> root
+</pre>
+</li>
+<li>Boot it:</li>
+<pre>
+boot
+</pre>
+</ol>
+
+<hr>
+		
+    <p>When finished continue to the <a href="post-install.html">post-install</a> step.
+
+<? hh_footer() ?>

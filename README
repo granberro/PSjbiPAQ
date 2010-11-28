@@ -7,7 +7,7 @@ What's needed
 1. An iPAQ H36xx, H37xx or H38xx.
 2. Either a jacket with CF reader or a craddle with serial port cable (prefered)
 3. A craddle/cable with USB connector.
-4. Install linux on your handheld.
+4. Install linux on your handheld. ftp://ftp.gwdg.de/pub/linux/handhelds/distributions/familiar/releases/v0.8.4/install/kits/bootgpe-v0.8.4-h3600.tar
 
 Warning
 -I take no responsability if your iPAQ get bricked.
