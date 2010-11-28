@@ -1,0 +1,45 @@
+<?
+require 'familiar.inc';
+hh_opt('rcsid', '$Id: bootldr-cf-mmc-sd.html,v 1.2 2006/08/20 00:13:01 rw Exp $');
+hh_header('Installing bootloader using CF/MMC/SD'); ?>
+
+	<em><p>
+	Please note that this manual does not cover the HP iPAQ H2200, Hx4700, and H6300
+	series of devices yet.
+	<p>Please <b>do not</b> even try to apply the existing instructions from the 
+	installation guide on any of the  HP iPAQ H2200, Hx4700, and H6300
+	series of devices. The installation will fail and in a worst case you may
+	<b>end up with a bricked device</b>.
+	</p>
+	
+	<p>We hope to be able to rectify the documentation situation shortly and
+	appologize for the delay.
+	</p></em>
+
+<p>Note that bootldr itself only supports CF.  So, while you can install
+bootldr from Pocket PC using an MMC or SD card, you can only install Linux
+if you have a CF card.</p>
+
+<ul>
+	<li>Copy the distribution files (all of them) to a CF card with a
+	vfat filesystem (most cards come pre-formatted with vfat), or
+	purchase a 32MB CF card with the distribution files from
+	<a href="http://crynwr.com/cf/">Crynwr Software</a>.
+	<li>Insert the CF card into your CF slot.
+	<li>Run Start Menu-&gt;Programs-&gt;File Explorer.
+	<li>Click on the grey bar with the picture of the iPAQ on it.
+	It probably says "My Documents".
+	<li>Select "My Device" from the drop-down menu.
+	<li>One of the entries on the screen should say "Storage Card".  Click on it.
+	<li>You should see a listing of the distribution files.
+	<li>Double-click on BootBlaster.
+	<li>BootBlaster will start up and display "Idle...".
+
+	<? include 'bootblaster-save.inc' ?>
+	<li>Copy saved_bootldr.gz, wince_image.gz and assets.gz from "My Documents" to the Storage Card using File Manager.
+	<? include "bootblaster-flash.inc" ?>
+</ul>
+
+<p>When finished continue to the <a href="install-cf.html">Install via Compact Flash sleeve  </a> step.
+
+<? hh_footer() ?>

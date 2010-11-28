@@ -1,0 +1,81 @@
+<?
+require 'familiar.inc';
+hh_opt('rcsid', '$Id: prerequisites.html,v 1.1 2006/08/19 23:25:07 rw Exp $');
+hh_header('Familiar 0.8.4 Prerequisites'); ?>
+    <h3>Supported platforms</h2>
+
+    <p>
+      This release candidate supports iPAQ  H3600, H3700, H3800, H3900, H5100, H5400, and H5500
+      units.
+    </p>
+    <p>
+      <em>
+         H51xx, H54xx, H55xx: The bootldr does not support the display
+         or CF/PCMCIA, so the root images must be <a
+		 href="install-serial.html">installed
+         via serial port.</a>
+      </em>
+    </p>
+    <p>
+    There is experimental support for iPAQ <a href="http://handhelds.org/projects/h2200">H2200</a>,
+    <a href="http://www.handhelds.org/moin/moin.cgi/HpIpaqH6315">H6300</a> and 
+    <a href="http://handhelds.org/projects/hx4700">hx4700</a> units in v0.8.4.
+    <p>
+      <em>
+         Note that, unfortunately, the Familiar installation manual does not yet cover
+         these devices. If you have followed the corresponding ports projects and are familiar with the
+         installation procedures, you are encouraged to try this release candidate. Otherwise
+         you are recommended to wait for the final v0.8.4 release which will be accompanied by
+         the required documentation.
+      </em>
+    </p>
+    <p>
+      The iPAQ H1900 is not yet supported.  Please refer to the 
+      <a href="http://handhelds.org/projects/h1900">H1900 project page</a> for current status.
+    </p>
+
+    <h3>Hardware requirements</h2>
+
+    <p>
+      As well as the iPAQ itself, you will need either:
+    </p>
+
+    <ul>
+      <li>
+	a CompactFlash memory card and a suitable sleeve; or 
+      </li>
+      <li>
+	a host machine running a terminal emulator, connected to the
+	iPAQ with a serial cradle or cable. 
+	<br>Note: a USB-only connection is not sufficient.
+      </li>
+    </ul>
+
+    <p>
+      Some form of Internet connectivity is strongly recommended.
+      Familiar supports these types of network connection:
+    </p>
+    
+    <ul>
+      <li>
+	CF/PCMCIA Ethernet
+      </li>
+      <li>
+	CF/PCMCIA wireless LAN
+      </li>
+      <li>
+	PPP over a serial line
+      </li>
+      <li>
+	USB connection to a host PC (requires special drivers on the
+	host)
+      </li>
+      <li>
+	LAP or PAN connection using Bluetooth
+      </li>
+    </ul>
+
+    <p>Return to <a href="index.html">index</a> or continue to <a href="download.html">download</a> the necessary files.</p>
+
+
+<? hh_footer() ?>

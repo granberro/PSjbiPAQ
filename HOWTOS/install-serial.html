@@ -1,0 +1,158 @@
+<?
+require 'familiar.inc';
+hh_opt('rcsid', '$Id: install-serial.html,v 1.1 2006/08/19 23:25:07 rw Exp $');
+hh_header('Installing Familiar 0.8.4 with a serial line');
+?>
+    <p>
+    You will need a serial sync cable or serial sync cradle.  The
+    dual USB/Serial cradle that comes with the H3800 and H3900 will also work.
+    You will need to
+      use a terminal program such as minicom, kermit, or Hyperterminal.
+    </p>
+
+    <p>
+      If you use minicom or kermit, you will need to use an external ymodem
+      program such as sb, which is available in the Linux lrzsz
+      package.
+    </p>
+    
+    <ol>
+      <li>
+        <p>
+	Hold down the joypad and push the reset button on the iPAQ.  You will need
+	      to remove it from the cradle to access the reset button.
+
+	 <ul>
+	  <li>For non-H5xxx:
+	  When the bootloader splash screen appears, release the joypad.
+	                   <br><img src="bootldr-splash.png"><br>
+          </li>
+	  <li>For H5xxx:
+	  When the iPAQ buzzes, release the joypad.  The screen will
+	  not change from whatever was previously displayed (blank,
+	  PocketPC, etc).  If the iPAQ does not stop vibrating, remove
+	  the AC adapter and the battery, then reinsert the battery
+	  and the AC adapter and perform try this step again. 
+          </li>
+         </ul>
+        </p>
+      </li>
+
+      <li>
+        <p>
+	  Press the calendar button on the iPAQ.  This is the leftmost
+	  action button, labelled "Serial Bootldr Console" on the screen.
+        </p>
+      </li>
+
+      <li>
+	<p>
+	  Make sure the terminal emulator is up and running, and is properly
+	  interacting with the bootloader.  Proper interaction consists of being
+	  able to issue commands, and get responses (e.g. the help command
+	  should return the bootloader usage). Your terminal emulator must be
+	  set to <b>115200 8N1 serial configuration, no flow control, no
+	    hardware handshaking</b>.  Failing to use these settings will lead to
+	  trouble, so double and triple check all settings.
+	</p>
+ 
+	<p> 
+	  If you cannot interact with the bootloader, make sure your
+	  terminal settings are correct, the iPAQ is properly connected to
+	  the host computer, and the iPAQ is actually on.  If everything
+	  seems fine, try restarting the host terminal emulator and
+	  resetting the iPAQ again.
+	</p>
+	
+	<p>
+	  Hyperterminal is particularly ill-behaved.  Sometimes it uses 100% of
+	  the CPU without allowing any interaction with the iPAQ.  In that case, you
+	  will need to use the task manager to terminate Hyperterminal before you can
+	  restart it.
+	</p>
+	
+      </li>
+      
+      <li>
+	<p>
+	  At the "boot&gt;" prompt, issue the following command:
+	  <code>load root</code>
+	</p>
+      </li>
+
+      <li>
+	<p>
+	Proceed to send or "upload" the jffs2 file (from the tarball that you downloaded earlier) with ymodem,
+	  using the terminal emulator. If you have not used ymodem
+	  before or you have any trouble with this command, please see
+	  <a
+	  href="http://www.handhelds.org/handhelds-faq/getting-started.html#USING-XYZMODEM">handhelds-faq/getting-started.html#USING-XYZMODEM</a>.
+	</p>
+
+	<p>
+	  Note that the bootldr now expects ymodem by default, not
+	  xmodem as in earlier versions.  If you are unable to use
+	  ymodem for some reason, you can revert to xmodem operation
+	  with the command <code>set ymodem 0</code>
+	</p>
+    
+
+    <p> 
+      You should see something like:</p>
+    
+    <table>
+	<tr>
+	  <td width=800 bgcolor=black color=white>
+	    <pre>
+<font color=white>
+boot&gt; load root
+loading flash region root
+ready for YMODEM download..
+Erasing sector 00140000
+Erasing sector 00180000
+Erasing sector 001C0000
+Erasing sector 00200000
+.
+.
+.
+addr: 00360000 data: 781590DB
+addr: 00370000 data: 642637AE
+addr: 00380000 data: E0021985
+addr: 00390000 data: 15DA97EC
+Erasing sector 00FC0000
+writing flash..
+addr: 00100000 data: E0021985
+addr: 00110000 data: E3BAD617
+addr: 00120000 data: 0FA1F57B
+addr: 00130000 data: 9343AEEB
+.
+.
+.
+addr: 00600000 data: E0021985
+addr: 00610000 data: FFFFFFFF
+addr: 00620000 data: FFFFFFFF
+addr: 00630000 data: FFFFFFFF
+verifying ... formatting ... done.
+boot&gt;
+</font>
+	    </pre>
+	  </td>
+	</tr>
+    </table>
+
+      </li>
+
+      <li>
+	<p>
+	  At the "boot&gt;" prompt, issue the following command: <code>boot</code>
+	</p>
+
+	<p>
+	  Linux should now start booting.
+	</p>
+      </li>
+    </ol>
+
+    <p>Continue to the <a href="post-install.html">post-install</a> step.
+
+<? hh_footer() ?>

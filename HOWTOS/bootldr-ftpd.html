@@ -1,0 +1,91 @@
+<?
+require 'familiar.inc';
+require 'install.inc';
+hh_opt('rcsid', '$Id: bootldr-ftpd.html,v 1.2 2006/08/20 00:13:01 rw Exp $');
+hh_header('Installing bootloader using ftpd'); ?>
+
+
+	<em><p>
+	Please note that this manual does not cover the HP iPAQ H2200, Hx4700, and H6300
+	series of devices yet.
+	<p>Please <b>do not</b> even try to apply the existing instructions from the 
+	installation guide on any of the  HP iPAQ H2200, Hx4700, and H6300
+	series of devices. The installation will fail and in a worst case you may
+	<b>end up with a bricked device</b>.
+	</p>
+	
+	<p>We hope to be able to rectify the documentation situation shortly and
+	appologize for the delay.
+	</p></em>
+
+<ul>
+	<li>Go fetch the <a href="http://www.oohito.com/wince/arm_j.htm">ftpsvr</a>.
+	<li>Unpack the zip file.
+	<li>Put ftpsvr.exe on a local webserver.
+	<li>Using an Ethernet card, or 802.11B card, or modem, gain access to the Internet.  The Pocket PC documentation tells you how to accomplish this step.
+	<li>Start Pocket IE.
+	<li>Give it the URL for ftpsvr.exe.
+	<li>It will download and run ftpsvr.
+	<li>Ftpsvr will not display anything!
+	<li>Switch to the directory containing the fileset you downloaded earlier.
+	<li>Run your local ftp client and open a session with your iPAQ.
+	<li>Any username and password will be accepted.  Yes, zero security.
+	<li>Ftpsvr does not accept passive connections.  Your ftp client may default to passive or active.  You should set passive off.  Enter the 'passive' command.  If it says "Passive mode on" then enter the passive command again.
+	<li>Enter the 'binary' command.
+	<li>Enter 'put <?echo $FAMILIAR_BL?>.gz "/My Documents/bootldr.bin"'
+	<li>Enter 'put <?echo $FAMILIAR_BB?> "/Windows/Start Menu/Programs/Bootblaster.exe'
+	<li>You now have BootBlaster and bootldr on your iPAQ.  Don't quit out of the ftp session.
+	<li>Now, on the iPAQ, run BootBlaster.  It's on the Start Menu under Programs.
+	<li>BootBlaster will start up and display "Idle...".
+	<? include 'bootblaster-save.inc' ?>
+	<li>Return to your desktop's ftp client.
+	<li>Enter 'get "\My Documents\saved_bootldr.gz" saved_bootldr.gz'
+	<li>Enter 'get "\My Documents\wince_image.gz" wince_image.gz'
+	<li>Enter 'quit'
+	<? include 'bootblaster-flash.inc' ?>
+</ul>
+
+Here's what your session might look like:
+
+<pre>
+	Connected to 65.172.240.59 (65.172.240.59).
+	220 FtpSvr (Version 0.06).
+	Name (65.172.240.59:nelson): a
+	331 Password required for a.
+	Password:
+	230 User a logged in.
+	ftp&gt; bin
+	200 Type set to I
+	ftp&gt; passive
+	Passive mode off.
+	ftp&gt; put <?echo $FAMILIAR_BL?>.bin "/My Documents/bootldr.bin"
+	local: <?echo $FAMILIAR_BL?> remote: /My Documents/bootldr.bin
+	200 PORT command successful.
+	150 Opening BINARY mode data connection for \My Documents\bootldr.bin.
+	226 Transfer complete.
+	237696 bytes sent in 1.05 secs (2.2e+02 Kbytes/sec)
+	ftp&gt; put <?echo $FAMILIAR_BB?> "/Windows/Start Menu/Programs/Bootblaster.exe"
+	local: <?echo $FAMILIAR_BB?> remote: /Windows/Start Menu/Programs/Bootblaster.exe
+	200 PORT command successful.
+	150 Opening BINARY mode data connection for \Windows\Start Menu\Programs\Bootblaster.exe.
+	226 Transfer complete.
+	117248 bytes sent in 0.446 secs (2.6e+02 Kbytes/sec)
+	ftp&gt; get "\My Documents\saved_bootldr.gz" saved_bootldr.gz
+	local: saved_bootldr.gz remote: \My Documents\saved_bootldr.gz
+	200 PORT command successful.
+	150 Opening BINARY mode data connection for \My Documents\saved_bootldr.gz(116176 bytes).
+	226 Transfer complete.
+	116176 bytes received in 0.847 secs (1.3e+02 Kbytes/sec)
+	ftp&gt; get "\My Documents\wince_image.gz" wince_image.gz
+	local: wince_image.gz remote: \My Documents\wince_image.gz
+	200 PORT command successful.
+	150 Opening BINARY mode data connection for \My Documents\wince_image.gz(14128724 bytes).
+	226 Transfer complete.
+	14128724 bytes received in 113 secs (1.2e+02 Kbytes/sec)
+	ftp&gt; quit
+	221 Goodbye
+</pre>
+
+<? include 'bootblaster-continue.inc' ?>
+
+<? hh_footer() ?>

@@ -1,0 +1,84 @@
+<?
+require 'familiar.inc';
+require 'install.inc';
+hh_opt('rcsid', '$Id: bootldr-activesync.html,v 1.2 2006/08/20 00:13:01 rw Exp $');
+hh_header('Installing bootloader using ActiveSync');
+?>
+
+	<em><p>
+	Please note that this manual does not cover the HP iPAQ H2200, Hx4700, and H6300
+	series of devices yet.
+	<p>Please <b>do not</b> even try to apply the existing instructions from the 
+	installation guide on any of the  HP iPAQ H2200, Hx4700, and H6300
+	series of devices. The installation will fail and in a worst case you may
+	<b>end up with a bricked device</b>.
+	</p>
+	
+	<p>We hope to be able to rectify the documentation situation shortly and
+	appologize for the delay.
+	</p></em>
+
+<ul>
+<li>Transfer BootBlaster and bootldr to your iPAQ using ActiveSync.
+<ol>
+<li><p>If ActiveSync isn't already installed on your Windows PC,
+install it by inserting the iPAQ Pocket PC Companion CD-ROM into the PC's
+drive and following the ensuing instructions.</p>
+
+<li><p>Copy the BootBlaster and bootldr files that came with your Familiar
+Linux distribution to your Windows PC if they're not already there.</p>
+<ul>
+<li><p>If you're installing on an H3900 iPAQ, the files are named
+<?echo $FAMILIAR_BB3900?> and <?echo $FAMILIAR_BL3900?>.</p>
+<li><p>Otherwise, they're named <?echo $FAMILIAR_BB?> and
+<?echo $FAMILIAR_BL?>.</p>
+</ul>
+
+<li><p>Plug the iPAQ cradle into an AC power outlet.</p>
+
+<li><p>Connect the USB connector from the cradle to the Windows PC.</p>
+
+<li><p>Slide the iPAQ into its cradle.  If a "Set Up a Partnership" screen
+appears on the PC, choose "No" and then click Next.</p>
+
+<li><p>Copy <?echo $FAMILIAR_BB?> or <?echo
+$FAMILIAR_BB3900?> to the default folder on the iPAQ by clicking Explore
+in ActiveSync and dragging their icons there.  Ignore any "may need to
+convert" messages.</p>
+
+<li><p>Do the same thing for <?echo $FAMILIAR_BL?> or
+<?echo $FAMILIAR_BL3900?>.</p>
+</ol>
+
+<li><p>Start BootBlaster.
+<ol>
+<li><p>Select "<code>Start -> Programs</code>" on the iPAQ touchscreen.</p>
+<li><p>Tap on File Explorer.</p>
+<li><p>Tap on BootBlaster.</p>
+</ol>
+
+<? include 'bootblaster-save.inc' ?>
+
+<li>Copy saved_bootldr.gz and wince_image.gz to your Windows PC.
+<ol>
+<li><p>Select "<code>View -> Refresh</code>" in the ActiveSync Explore window
+on the PC.  Icons for the saved_bootldr.gz and wince_image.gz files should
+appear.</p>
+
+<li><p>Drag the saved_bootldr.gz and wince_image.gz icons from the ActiveSync
+Explore window to a local folder on your PC.</p>
+</ol>
+
+<p>
+As with any backup files, please store saved_bootldr.gz and wince_image.gz in
+a safe place.  We highly recommend verifying the built-in gzip checksum in
+both files before presuming your backup is safe (see the gzip man page for
+details).</p>
+
+<? include "bootblaster-flash.inc" ?>
+
+Continue to the <a href="install-serial.html">install serial</a> step.</p>
+</ul>
+<p>
+
+<? hh_footer() ?>

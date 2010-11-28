@@ -1,0 +1,151 @@
+<?
+require 'familiar.inc';
+require 'install.inc';
+hh_opt('rcsid', '$Id: bootldr-synce.html,v 1.2 2006/08/20 00:13:01 rw Exp $');
+hh_header('Installing the bootloader using SynCE'); ?>
+
+	<em><p>
+	Please note that this manual does not cover the HP iPAQ H2200, Hx4700, and H6300
+	series of devices yet.
+	<p>Please <b>do not</b> even try to apply the existing instructions from the 
+	installation guide on any of the  HP iPAQ H2200, Hx4700, and H6300
+	series of devices. The installation will fail and in a worst case you may
+	<b>end up with a bricked device</b>.
+	</p>
+	
+	<p>We hope to be able to rectify the documentation situation shortly and
+	appologize for the delay.
+	</p></em>
+
+    <h2>Introduction</h2>
+<p>
+    SynCE transfers between Linux and Microsoft Pocket PC using the same protocol that "ActiveSync" uses.
+    </p>
+    <p>SynCE is quite new and evolving rapidly, and its use for installing Linux on the iPAQ is 
+    also new, so it is quite possible you will have difficulties given its early state and rapid
+    evolution. The directions below were written using SynCE version 0.7. Using
+    SynCE does spare you from having to have a Windows system to
+    install Linux on your iPAQ. </p>
+    <p>
+    If you have difficulties, you can always use the <a href="bootldr-activesync.html">ActiveSync method</a> 
+    of bootloader installation.
+
+    <h2>Bootldr Installation and Backup</h2>
+<ol>
+    <li>First: install <a href="http://synce.sourceforge.net/synce/">SynCE</a>.
+    <p>
+    <li>Plug in your serial cable from your system to the iPAQ, and make sure the
+    iPAQ is plugged into its power-supply.  You don't want your iPAQ to run out of power in the middle
+    of this procedure.
+    <p>
+    <li>Startup SynCE:
+     Start the SynCE communications daemon and configure your serial port on your
+     Linux system by executing the following commands, which start up SynCE, configure
+     your serial port, and start up a PPP connection to the iPAQ.  Some of the commands
+     must be executed as root, and some must not be executed as root: the commands that
+     must be exectuted as root are indicated by use of the "sudo" command below.
+     <ul>
+     <p>
+     <code>dccm</code>
+     <br>
+     <code>sudo synce-serial-config ttyS0</code>
+     <br>
+     <code>sudo synce-serial-start</code>
+     </ul>
+     <p>
+    If all is well, you'll get cheery connect tones from your iPAQ, and ppp0 will
+    be alive and well on your Linux system, and the iPAQ can be pinged using 
+    the address shown by your ifconfig ppp0 information.</p>
+    <li> Two programs have to be copied to the iPAQ: 
+         a program "BootBlaster" that is used to rewrite the 
+         boot sector in flash with a bootloader "bootldr" able to support Linux (and PocketPC).
+	 <p>
+	 For H3100, H3600, H3700 and H3800 machines, the flash rewriter is named
+	 <code>BootBlaster_1.18.exe</code>. 
+	 <br>For H3900, H5400, and H5500 machines, it is named
+	 <code>BootBlaster3900-2.3.exe</code>.
+	 <p>
+	 For H3100, H3600, H3700 and H3800 machines, the boot loader is named
+	 <code><?echo $FAMILIAR_BL?>.gz</code>.
+	 <br> For H3900, H5400, and H5500 machines, it is named
+	 <code><?echo $FAMILIAR_BL3900?>.gz</code>.</p>
+	 Bootblaster will take either gzipped or not-gzipped bootloader images; best to
+	 use the supplied .gz format files.
+	 <p>
+	 The following SynCE commands will do the copy of these files
+	 for all but the H3900:
+	 <p>
+	 <ul>
+		 <code>pcp <?echo $FAMILIAR_BL?>.gz ":/My Documents/bootldr.bin.gz"</code>
+	 <br>
+	 <code>pcp BootBlaster_1.18.exe ":/Windows/Start Menu/Programs/Bootblaster.exe"</code>
+	 </ul>
+	 <p>For the H3900, the commands are:
+	 <p>
+	 <ul>
+		 <code>pcp <?echo $FAMILIAR_BL3900?>.gz ":/My Documents/bootldr.bin.gz"</code>
+	 <br>
+	 <code>pcp <?echo $FAMILIAR_BB?> ":/Windows/Start Menu/Programs/Bootblaster.exe"</code
+	 </ul>
+	 <p>
+	 <a name="runbootldr"></a>
+     <li>Start up BootBlaster
+     <p> From Pocket PC: "<code>Start->Programs-Bootblaster</code>", or from
+     Linux, by the command:
+     <p>
+     <ul>
+     <code>prun "/Windows/Start Menu/Programs/Bootblaster.exe"</code>
+     </ul>
+     </p>
+
+     <? include 'bootblaster-save.inc' ?>
+     <li>Copy these files back to your Linux system by executing the following commands:
+    <p>
+    <ul>
+    <code>pcp ":/My Documents/saved_bootldr.gz"</code>
+    <br>
+    <code>pcp ":/My Documents/wince_image.gz"</code>
+    </ul>
+    <p>
+    Copying the bootldr file takes about 10 seconds over a serial line.
+    As the Pocket PC image is pretty large, and serial lines slow, the copy of Pocket PC takes quite a while
+    over a serial line (~20 minutes).
+    <p>
+    As in any backup files, please save them in a safe place.
+    We save them in .gz form, both to speed copying them to the host, but more imporantly,
+    to allows you to check whether the files have
+    been correctly copied due to the internal checksum.  We highly recommend checking
+    the checksum on both files before presuming your backup is safe (see the gzip man
+    page for details).
+
+    <? include "bootblaster-flash.inc" ?>
+
+    <p>
+    Shut down SynCE, "<code>killall dccm</code>", and
+    continue to the <a href="install-serial.html">install serial</a> step. </p>
+</ol>
+<p>
+
+<h2>Scripting</h2>
+Paulo writes: "I install a lot of iPAQ with Linux, so i built my own script to do that from my Linux Box:"</p>
+
+<pre>
+#!/bin/sh
+dccm
+sudo synce-serial-config ttyS0
+sleep 1
+sudo synce-serial-start
+sleep 3
+pcp <samp><?echo $FAMILIAR_BL?></samp> ":/My Documents/bootldr.bin"
+sleep 1
+pcp <samp><?echo $FAMILIAR_BB?></samp> ":/Windows/Start Menu/Programs/Bootblaster.exe"
+sleep 1
+prun "/Windows/Start Menu/Programs/Bootblaster.exe"
+sleep 1
+synce-serial-abort
+sleep 1
+killall dccm
+</pre>
+<address><a href="mailto:jg@handhelds.org">Jim Gettys</a></address>
+
+<? hh_footer() ?>
