@@ -1,0 +1,16 @@
+This is still work in progress.
+
+Unfortunatelly the site handhelds.org is now down, so most of the available information has vanished. There seems to be ftp mirrors hosting the information.
+
+What's needed
+
+1. An iPAQ H36xx, H37xx or H38xx.
+2. Either a jacket with CF reader or a craddle with serial port cable (prefered)
+3. A craddle/cable with USB connector.
+4. Install linux on your handheld.
+
+Warning
+-I take no responsability if your iPAQ get bricked.
+-There is no dual boot capability, although it is posible to reinstall WindowsCE
+
+
