@@ -21,7 +21,6 @@
 #include <asm/dma.h>
 #include <asm/irq.h>
 #include <asm/mach-types.h>
-#include "sa1100_usb.h"
 #include "usb_ctl.h"
 #include "psfreedom_devices.h"
 
@@ -34,7 +33,6 @@ static int tx_pktsize;
 static int rx_pktsize;
 static int timer_added = 0;
 static void * desc_buf;
-static int reset_repeat = 0;
 
 #define USB_BUFSIZ 4096
 
@@ -42,8 +40,7 @@ static int reset_repeat = 0;
 //u8 *port1_config_desc; // OJO
 unsigned int port1_config_desc_size = 3840; // OJO
 
-/* global write struct to keep write
-   ..state around across interrupts */
+/* global write struct to keep write state around across interrupts */
 static struct {
 		unsigned char *p;
 		int bytes_left;
@@ -55,64 +52,54 @@ static void udc_int_hndlr(int irq, void *dev_id, struct pt_regs *regs)
 	
 	if (start_time==0) {
 		start_time = jiffies;
-	}	
-	
+	}
+
 	PRINTKD("[%lu]Status %d Mask %d\n", (jiffies-start_time)*10, status, Ser0UDCCR);
-	
+
 	/* ReSeT Interrupt Request - UDC has been reset */
 	if (status & UDCSR_RSTIR)
 	{
-		Ser0UDCSR |= UDCSR_RSTIR;
-		if (Ser0UDCSR & UDCSR_RSTIR)
-			return;
-		
-		PRINTKD("[%lu]status limpio %d\n", (jiffies-start_time)*10, Ser0UDCSR);
-
-		Ser0UDCCR = 0;
-
-		if (reset_repeat == 0) {
-			/* starting 20ms or so reset sequence now... */
-			ep0_reset();  // just set state to idle
-			ep1_reset();  // flush dma, clear false stall
-			ep2_reset();  // flush dma, clear false stall
-
-			reset_repeat = 1;
-
-			// mask reset ints, they flood during sequence, enable 
-			// suspend and resume
-			//	Ser0UDCCR |= UDCCR_REM;    // mask reset //26-10-10 errata 29
-	//		Ser0UDCCR &= ~(UDCCR_SUSIM | UDCCR_RESIM); // enable suspend and resume
-		}
-
-		return;		// <-- no reason to continue if resetting
-	}
+		Ser0UDCCR = 0xFC;
+		Ser0UDCCR = UDCCR_TIM;
 	
-	reset_repeat = 0;
-	// else we have done 	something other than reset, so be sure reset enabled
-//26-10-10	UDC_clear( Ser0UDCCR, UDCCR_REM );	// OJO parece que en B5 esto debe ser siempre 1
+		/* starting 20ms or so reset sequence now... */
+		ep0_reset();  // just set state to idle
+		ep1_reset();  // flush dma, clear false stall
+		ep2_reset();  // flush dma, clear false stall
+
+		UDC_flip(Ser0UDCSR, status); // clear all pending sources
+		printk("[%lu]Reset: Mask %d\n", (jiffies-start_time)*10, Ser0UDCCR);
+		return;
+	}
 	
 	// /* RESume Interrupt Request */
 	if ( status & UDCSR_RESIR )
 	{
-		UDC_clear(Ser0UDCCR, UDCCR_EIM | UDCCR_RIM | UDCCR_TIM | UDCCR_SUSIM | UDCCR_RESIM);
+		core_kicker();
+		Ser0UDCCR = 0xFC;
+		Ser0UDCCR = UDCCR_TIM;
+		UDC_flip(Ser0UDCSR, status); // clear all pending sources
+		printk("[%lu]Resume: Mask %d\n", (jiffies-start_time)*10, Ser0UDCCR);
+		return;
 	}
 
 	/* SUSpend Interrupt Request */
 	if ( status & UDCSR_SUSIR )
 	{
-		ep0_reset();  // just set state to idle
-		ep1_reset();  // flush dma, clear false stall
-		ep2_reset();  // flush dma, clear false stall
-	
-		UDC_set( Ser0UDCCR, UDCCR_SUSIM);				
-		UDC_clear(Ser0UDCCR, UDCCR_EIM | UDCCR_RIM | UDCCR_TIM | UDCCR_RESIM);
-		printk("[%lu]Suspended: Status %d Port %d Address %d\n", (jiffies-start_time)*10, status, currentPort, Ser0UDCAR);
-		machine_state=INIT;
-		hub_interrupt_queued = 0;		
-		currentPort = 0;
+		Ser0UDCCR = 0xFC;
+		Ser0UDCCR = UDCCR_TIM;
+		UDC_flip(Ser0UDCSR, status); // clear all pending sources
+		printk("[%lu]Suspended: Mask %d\n", (jiffies-start_time)*10, Ser0UDCCR);
+		return;
 	}
 
 	UDC_flip(Ser0UDCSR, status); // clear all pending sources
+	
+	// Test reset
+	if (tr) {
+		debug = 0;
+		return;		
+	}
 
 	if (status & UDCSR_RIR)
 		ep1_int_hndlr(status);
@@ -120,14 +107,93 @@ static void udc_int_hndlr(int irq, void *dev_id, struct pt_regs *regs)
 	if (status & UDCSR_TIR)	
 		ep2_int_hndlr(status);
 	
-	if (status & UDCSR_EIR) // OJO En el codigo original es el primero que se procesa
+	if (status & UDCSR_EIR)
 		ep0_int_hndlr();
 		
+	// Set address woodoo
 	if (Ser0UDCAR != portAddress[currentPort]) {
 		Ser0UDCAR = portAddress[currentPort];
-		PRINTKI("[%lu]Apply address %d - %d\n", (jiffies-start_time)*10, portAddress[currentPort], Ser0UDCAR);			
+		PRINTKD("[%lu]Apply address %d - %d\n", (jiffies-start_time)*10, portAddress[currentPort], Ser0UDCAR);			
+	}		
+}
+
+static inline void enable_resume_mask_suspend( void )
+{
+	int i = 0;
+
+	while( 1 ) {
+		Ser0UDCCR |= UDCCR_SUSIM; // mask future suspend events
+		udelay( i );
+		if ((Ser0UDCCR & UDCCR_SUSIM) || (Ser0UDCSR & UDCSR_RSTIR) )
+			break;
+		if ((Ser0UDCCR & UDCCR_SUSIM) || (Ser0UDCSR & UDCSR_RSTIR) )
+			break;			
+		if ( ++i == 50 ) {
+			printk("UDC: enable_resume: could not set SUSIM 0x%08x\n", Ser0UDCCR);
+			break;
+		}
 	}
-		
+
+	 i = 0;
+	while( 1 ) {
+		Ser0UDCCR &= ~UDCCR_RESIM;
+		udelay( i );
+		if ((Ser0UDCCR & UDCCR_RESIM ) == 0 || (Ser0UDCSR & UDCSR_RSTIR))
+			break;
+		if ((Ser0UDCCR & UDCCR_RESIM ) == 0 || (Ser0UDCSR & UDCSR_RSTIR))
+			break;			
+		if (++i == 50 ) {
+			printk("UDC: enable_resume: could not clear RESIM 0x%08x\n", Ser0UDCCR);
+			break;
+		}
+	}
+}
+
+static inline void enable_suspend_mask_resume(void)
+{
+	 int i = 0;
+	while( 1 ) {
+		Ser0UDCCR |= UDCCR_RESIM; // mask future resume events
+		udelay( i );
+		if (Ser0UDCCR & UDCCR_RESIM || (Ser0UDCSR & UDCSR_RSTIR) )
+			break;
+		if (Ser0UDCCR & UDCCR_RESIM || (Ser0UDCSR & UDCSR_RSTIR) )
+			break;			
+		if (++i == 50 ) {
+			printk("UDC: enable_resume: could not clear RESIM 0x%08x\n", Ser0UDCCR);
+			break;
+		}
+	}
+	 i = 0;
+	while( 1 ) {
+		Ser0UDCCR &= ~UDCCR_SUSIM;
+		udelay( i );
+		if ((Ser0UDCCR & UDCCR_SUSIM ) == 0	|| (Ser0UDCSR & UDCSR_RSTIR))
+			break;
+		if ((Ser0UDCCR & UDCCR_SUSIM ) == 0	|| (Ser0UDCSR & UDCSR_RSTIR))
+			break;
+		if ( ++i == 50 ) {
+			printk("UDC: enable_resume: could not set SUSIM 0x%08x\n", Ser0UDCCR);
+			break;
+		}
+	}
+}
+
+// HACK DEBUG  3Mar01ww
+// Well, maybe not, it really seems to help!  08Mar01ww
+static void core_kicker( void )
+{
+	 __u32 car = Ser0UDCAR;
+	 __u32 imp = Ser0UDCIMP;
+	 __u32 omp = Ser0UDCOMP;
+
+	 UDC_set(Ser0UDCCR, UDCCR_UDD );
+	 udelay( 300 );
+	 UDC_clear(Ser0UDCCR, UDCCR_UDD);
+
+	 Ser0UDCAR = car;
+	 Ser0UDCIMP = imp;
+	 Ser0UDCOMP = omp;
 }
 
 //////////////////////////////////////////////////////////////////////////////
@@ -139,19 +205,21 @@ int sa1100_usb_start( void ) {
 	desc_t pd;
 	
 	usbd_info.state = USB_STATE_SUSPENDED;
-	
-	/* start UDC internal machinery running */
-	udc_enable();
-	
-	udelay(100);
-
+	/* Enable UDC and mask everything */
+	UDC_write(Ser0UDCCR , 0xFC);
+	// printk("[%lu]reg %d status %d\n", (jiffies-start_time)*10, Ser0UDCCR, Ser0UDCSR);
+	// /* start UDC internal machinery running */
+	// UDC_clear(Ser0UDCCR, UDCCR_UDD);
+	// printk("[%lu]reg %d status %d\n", (jiffies-start_time)*10, Ser0UDCCR, Ser0UDCSR);
+	// udelay(100);
+	// printk("[%lu]reg %d status %d\n", (jiffies-start_time)*10, Ser0UDCCR, Ser0UDCSR);
 	/* clear stall - receiver seems to start stalled? 19Jan01ww */
 	/* also clear other stuff just to be thurough 22Feb01ww */
 	UDC_clear(Ser0UDCCS1, UDCCS1_FST | UDCCS1_RPE | UDCCS1_RPC );
 	UDC_clear(Ser0UDCCS2, UDCCS2_FST | UDCCS2_TPE | UDCCS2_TPC );
 
 	/* mask everything */
-	UDC_write(Ser0UDCCR , 0xFC);
+	// UDC_write(Ser0UDCCR , 0xFC);
 
 	usb_get_hub_descriptor(&pd);
 	rx_pktsize = __le16_to_cpu( pd.b.ep1.wMaxPacketSize );	
@@ -162,17 +230,21 @@ int sa1100_usb_start( void ) {
 	ep2_init( usbd_info.dmach_tx );
 
 	/* clear all top-level sources */
-	//printk("[%lu]status %d\n", (jiffies-start_time)*10, Ser0UDCSR);
 	Ser0UDCSR = UDCSR_RSTIR | UDCSR_RESIR | UDCSR_EIR | UDCSR_RIR | UDCSR_TIR | UDCSR_SUSIR ;
-	//printk("[%lu]status %d\n", (jiffies-start_time)*10, Ser0UDCSR);
 	
 	/* EXERIMENT - a short line in the spec says toggling this
 	..bit diddles the internal state machine in the udc to
 	..expect a suspend */
 	Ser0UDCCR  |= UDCCR_RESIM; 
 	/* END EXPERIMENT 10Feb01ww */
+	UDC_write( Ser0UDCCR, UDCCR_SUSIM | UDCCR_TIM);
 
-	UDC_write( Ser0UDCCR, UDCCR_SUSIM );
+	/* clear all top-level sources */
+	Ser0UDCSR = UDCSR_RSTIR | UDCSR_RESIR | UDCSR_EIR | UDCSR_RIR | UDCSR_TIR | UDCSR_SUSIR ;
+	
+return 0;			
+			UDC_write( Ser0UDCCR, 0);
+			Ser0UDCSR = UDCSR_RSTIR | UDCSR_RESIR | UDCSR_EIR | UDCSR_RIR | UDCSR_TIR | UDCSR_SUSIR ;
 	
 	return 0;
 }
@@ -224,28 +296,6 @@ static void udc_disable(void)
 	UDC_set( Ser0UDCCR, UDCCR_UDD);
 }
 
-/*  enable the udc at the source */
-static void udc_enable(void)
-{
-	UDC_clear(Ser0UDCCR, UDCCR_UDD);
-}
-
-// HACK DEBUG  3Mar01ww
-// Well, maybe not, it really seems to help!  08Mar01ww
-// static void core_kicker( void )
-// {
-	 // __u32 car = Ser0UDCAR;
-	 // __u32 imp = Ser0UDCIMP;
-	 // __u32 omp = Ser0UDCOMP;
-
-	 // UDC_set( Ser0UDCCR, UDCCR_UDD );
-	 // udelay( 300 );
-	 // UDC_clear(Ser0UDCCR, UDCCR_UDD);
-
-	 // Ser0UDCAR = car;
-	 // Ser0UDCIMP = imp;
-	 // Ser0UDCOMP = omp;
-// }
 
 //////////////////////////////////////////////////////////////////////////////
 // Module Initialization and Shutdown

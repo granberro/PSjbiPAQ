@@ -70,7 +70,6 @@ mod_timer (&state_machine_timer, jiffies + msecs_to_jiffies(ms))
 #define USB_DT_ENDPOINT_SIZE sizeof(ep_desc_t)
 #define USB_DT_ENDPOINT USB_DESC_ENDPOINT
 
-
 enum { 
   INIT,
   HUB_READY,
@@ -97,11 +96,12 @@ enum {
   DEVICE5_DISCONNECTED,
   DONE,
 };
-static int machine_state;
+
 static void hub_port_changed(void);
 static void hub_disconnect_port (unsigned int port);
 static void jig_response_send (void);
 static void hub_interrupt_complete(int flag, int size);
+static void state_machine_timeout(unsigned long data);
 
 struct hub_port {
   u16 status;

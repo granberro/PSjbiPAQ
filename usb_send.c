@@ -23,8 +23,6 @@
 #include <asm/dma.h>
 #include <asm/system.h>
 #include <asm/byteorder.h>
-
-#include "sa1100_usb.h"
 #include "usb_ctl.h"
 
 //#define SA1100_USB_DMA_WORKAROUND

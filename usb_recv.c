@@ -19,8 +19,6 @@
 #include <linux/errno.h>
 #include <asm/dma.h>
 #include <asm/system.h>
-
-#include "sa1100_usb.h"
 #include "usb_ctl.h"
 
 static char *ep1_buf;

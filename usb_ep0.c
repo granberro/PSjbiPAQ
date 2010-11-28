@@ -43,7 +43,6 @@
  */
 
 #include <linux/delay.h>
-#include "sa1100_usb.h"  /* public interface */
 
 #define STATUS_STR(s) (                                         \
       s==INIT?"INIT":                                           \
@@ -87,16 +86,6 @@
 
 #ifndef MIN
 #define MIN( a, b ) ((a)<(b)?(a):(b))
-#endif
-
-#if 1 && !defined( ASSERT )
-#  define ASSERT(expr) \
-          if(!(expr)) { \
-          printk( "Assertion failed! %s,%s,%s,line=%d\n",\
-          #expr,__FILE__,__FUNCTION__,__LINE__); \
-          }
-#else
-#  define ASSERT(expr)
 #endif
 
 /***************************************************************************
@@ -158,15 +147,23 @@ void ep0_reset(void)
 void ep0_int_hndlr( void )
 {
 	 PRINTKD( "[%lu]In  /\\(%d)\t", (jiffies-start_time)*10, Ser0UDCAR );
-	 
+
 	 if (debug)
 		pcs();
 
 	/* if not in setup begin, we are returning data.
 		execute a common preamble to both write handlers
 	*/
-	if ( current_handler != sh_setup_begin )
+	if ( current_handler != sh_setup_begin ) {
 		common_write_preamble();
+	}
+	else {
+		// If ep0 is idle back to hub port if required
+		if (switch_to_port_delayed == 0) {
+			//printk( "[%lu]sm\n", (jiffies-start_time)*10);
+			state_machine_timeout(0);
+		}
+	}
 
 	(*current_handler)();
 
@@ -212,7 +209,7 @@ static void sh_setup_begin( void )
 	}
 
 	/* Be sure out packet ready, otherwise something is wrong */
-	if ( (cs_reg_in & UDCCS0_OPR) == 0 ) {
+	if ((cs_reg_in & UDCCS0_OPR) == 0 ) {
 		/* we can get here early...if so, we'll int again in a moment  */
 		// PRINTKD( "[%lu]%ssetup begin: no OUT packet available. Exiting EP0 %d\n", (jiffies-start_time)*10, pszep0,
 				// cs_reg_in);
@@ -460,28 +457,28 @@ unknown:
 					set_cs_bits( UDCCS0_DE | UDCCS0_SO );
 					break;
 				case 16: // C_PORT_CONNECTION
-					PRINTKI( "[%lu]ClearPortFeature C_PORT_CONNECTION called disconn %d\n", (jiffies-start_time)*10, req.wIndex);
+					PRINTKI( "[%lu]ClearPortFeature C_PORT_CONNECTION called\n", (jiffies-start_time)*10);
 					port_change[req.wIndex-1] &= ~PORT_STAT_C_CONNECTION;					
 					switch (machine_state) {
 					case DEVICE1_WAIT_DISCONNECT:
 						machine_state = DEVICE1_DISCONNECTED;
-						SET_TIMER (200);
+						SET_TIMER (200/tf);
 						break;
 					case DEVICE2_WAIT_DISCONNECT:
 						machine_state = DEVICE2_DISCONNECTED;
-						SET_TIMER (170);
+						SET_TIMER (170/tf);
 						break;
 					case DEVICE3_WAIT_DISCONNECT:
 						machine_state = DEVICE3_DISCONNECTED;
-						SET_TIMER (450);
+						SET_TIMER (450/tf);
 						break;
 					case DEVICE4_WAIT_DISCONNECT:
 						machine_state = DEVICE4_DISCONNECTED;
-						SET_TIMER (200);
+						SET_TIMER (200/tf);
 						break;
 					case DEVICE5_WAIT_DISCONNECT:
 						machine_state = DEVICE5_DISCONNECTED;
-						SET_TIMER (200);
+						SET_TIMER (200/tf);
 						break;
 					default:
 						break;
@@ -489,7 +486,7 @@ unknown:
 					set_cs_bits( UDCCS0_DE | UDCCS0_SO );
 					break;
 				case 20: // C_PORT_RESET
-					PRINTKI( "[%lu]ClearPortFeature C_PORT_RESET called conn %d\n", (jiffies-start_time)*10, req.wIndex);
+					PRINTKI( "[%lu]ClearPortFeature C_PORT_RESET called\n", (jiffies-start_time)*10);
 					port_change[req.wIndex-1] &= ~PORT_STAT_C_RESET;
 					switch (machine_state) {
 					case DEVICE1_WAIT_READY:
@@ -519,13 +516,7 @@ unknown:
 									to this request with the proper address */
 					set_cs_bits( UDCCS0_DE | UDCCS0_SO );
 					if (switch_to_port_delayed >= 0) {
-						if (no_delayed_switching) {
-							switch_to_port (switch_to_port_delayed);
-							switch_to_port_delayed = -1;
-						}
-						else {
-							SET_TIMER (0);
-						}
+						SET_TIMER (0);
 					}
 					break;
 				}					
@@ -586,7 +577,7 @@ unknown:
 					set_cs_bits( UDCCS0_DE | UDCCS0_SO );
 					if (machine_state == INIT && req.wIndex == 6) {
 						machine_state = HUB_READY;
-						SET_TIMER (15); // Ojo 150
+						SET_TIMER (150/tf);
 					}					
 					break;
 				case 0: /* PORT_CONNECTION */
@@ -656,7 +647,7 @@ static void common_write_preamble( void )
 	 __u32 cs_reg_in = Ser0UDCCS0;
 
 	 if ( cs_reg_in & UDCCS0_SE ) {
-		  PRINTKD( "[%lu]%swrite_preamble(): Early termination of setup\n", (jiffies-start_time)*10, pszep0 );
+		  PRINTKD( "[%lu]write_preamble(): Early termination of setup\n", (jiffies-start_time)*10);
  		  wr.bytes_left=0;
 		  wr.p = NULL;
  		  Ser0UDCCS0 =  UDCCS0_SSE;  		 /* clear setup end */
@@ -672,8 +663,8 @@ static void common_write_preamble( void )
 	 }
 
 	 if ( cs_reg_in & UDCCS0_OPR ) {
-		PRINTKD( "[%lu]%swrite_preamble(): see OPR. Stopping write to "
-				   "handle new SETUP\n", (jiffies-start_time)*10, pszep0 );
+		PRINTKD( "[%lu]write_preamble(): see OPR. Stopping write to handle new SETUP\n", 
+					(jiffies-start_time)*10);
 		wr.bytes_left=0;
 		wr.p = NULL;
  
@@ -697,7 +688,7 @@ static void sh_write()
 	 //PRINTKD( "[%lu]W\n", (jiffies-start_time)*10);
 
 	 if ( Ser0UDCCS0 & UDCCS0_IPR ) {
-		  PRINTKD( "[%lu]%ssh_write(): IPR set, exiting\n", (jiffies-start_time)*10, pszep0 );
+		  PRINTKD( "[%lu]sh_write(): IPR set, exiting\n", (jiffies-start_time)*10);
 		  return;
 	 }
 
@@ -731,7 +722,7 @@ static void sh_write_with_empty_packet( void )
 	PRINTKD( "[%lu]WE\n", (jiffies-start_time)*10);
 
 	if ( Ser0UDCCS0 & UDCCS0_IPR ) {
-		PRINTKD( "[%lu]%ssh_write(): IPR set, exiting\n", (jiffies-start_time)*10, pszep0 );
+		PRINTKD( "[%lu]sh_write_empty(): IPR set, exiting\n", (jiffies-start_time)*10);
 		return;
 	}
 
@@ -744,7 +735,7 @@ static void sh_write_with_empty_packet( void )
 		set_ipr_and_de();
 		wr.p = NULL;
 		current_handler = sh_setup_begin;
-		PRINTKD( "[%lu]%ssh_write empty() Sent empty packet \n", (jiffies-start_time)*10, pszep0 );
+		PRINTKD( "[%lu]sh_write empty() Sent empty packet \n", (jiffies-start_time)*10);
 	}
 	else {
 		write_fifo();				/* send data */
@@ -827,17 +818,20 @@ static void write_fifo( void )
 	while( bytes_this_time-- ) {
 		 PRINTKD( "%2.2X ", *wr.p );
 		 i = 0;
-
 		 do {
-			  if (Ser0UDCWC == bytes_written)
-			  {
-			  Ser0UDCD0 = *wr.p;			  
-			  udelay( 20 );  /* voodo 28Feb01ww */			  
-			  }
-			  i++;
-		 } while( Ser0UDCWC == bytes_written && i < 1000 );
-		 if ( i == 1000 ) {
-			  printk( "[%lu]%swrite_fifo: write failure byte %d\n", (jiffies-start_time)*10, pszep0 , bytes_written+1);
+			// Early termination (SETUP END) stop sending
+			if (Ser0UDCCS0 & UDCCS0_SE) {
+				PRINTKD( "[%lu]write_fifo(): Early termination of setup\n", (jiffies-start_time)*10);
+				return;
+			}
+				
+			Ser0UDCD0 = *wr.p;
+			udelay( 20 );  /* voodo 28Feb01ww */			  
+			i++;
+		 } while( Ser0UDCWC == bytes_written && i < 10 );
+		 if ( i == 10 ) {
+			printk( "[%lu]Write_fifo: write failure byte %d. CCR %d CSR %d CS0 %d\n", (jiffies-start_time)*10, bytes_written+1,
+				Ser0UDCCR, Ser0UDCSR, Ser0UDCCS0);
 		 }
 
 		 wr.p++;
@@ -872,15 +866,13 @@ static int read_fifo( usb_dev_request_t * request )
 
 	fifo_count = ( Ser0UDCWC & 0xFF );
 
-	//ASSERT( fifo_count <= 8 );
-
 	//PRINTKD( "[%lu]RF=%d ", (jiffies-start_time)*10, fifo_count );
 
 	while( fifo_count-- ) {
 		 i = 0;
 		 do {
-			  *pOut = (unsigned char) Ser0UDCD0;
-			  udelay( 10 );
+			*pOut = (unsigned char) Ser0UDCD0;
+			udelay( 10 );
 		 } while( ( Ser0UDCWC & 0xFF ) != fifo_count && i < 10 );
 		 if ( i == 10 ) {
 			  printk( "[%lu]%sread_fifo(): read failure\n", (jiffies-start_time)*10, pszep0 );
@@ -1009,7 +1001,6 @@ static void get_device_descriptor(usb_dev_request_t * pReq) {
 				if (idx == (PORT1_NUM_CONFIGS-1) && pReq->wLength > 8) {
 					machine_state = DEVICE1_READY;
 					switch_to_port_delayed = 0;
-					SET_TIMER (100);					
 				}
 			}
 			PRINTKD( "[%lu]Device Req type %d, idx %d reqlen %d serve %d\n", (jiffies-start_time)*10, type, idx, pReq->wLength, value);
@@ -1019,7 +1010,6 @@ static void get_device_descriptor(usb_dev_request_t * pReq) {
 			memcpy(desc_buf, port2_config_desc, value);
 			if (pReq->wLength > 8) {
 				machine_state = DEVICE2_READY;
-				SET_TIMER (150);
 				switch_to_port_delayed = 0;
 			}
 			break;
@@ -1028,7 +1018,6 @@ static void get_device_descriptor(usb_dev_request_t * pReq) {
 			memcpy(desc_buf, port3_config_desc, value);
 			if (idx == 1 && pReq->wLength > 8) {
 				machine_state = DEVICE3_READY;
-				SET_TIMER (80);
 				switch_to_port_delayed = 0;
 			}
 			break;
@@ -1049,7 +1038,7 @@ static void get_device_descriptor(usb_dev_request_t * pReq) {
 				memcpy(desc_buf, port4_config_desc_3, value);
 				if (pReq->wLength > 8) {
 					machine_state = DEVICE4_READY;
-					SET_TIMER (180);
+					printk( "[%lu]d4\n", (jiffies-start_time)*10);
 					switch_to_port_delayed = 0;
 				}
 			}
@@ -1112,78 +1101,87 @@ static void set_cs_bits( __u32 bits )
 
 static void set_de( void )
 {
-	 int i = 1;
-	 while( 1 ) {
-		  if ( OK_TO_WRITE ) {
-				Ser0UDCCS0 |= UDCCS0_DE;
-		  } else {
-			   //PRINTKD( "[%lu]%sQuitting set DE because SST or SE set\n", (jiffies-start_time)*10, pszep0 );
-			   break;
-		  }
-		  if ( Ser0UDCCS0 & UDCCS0_DE )
-			   break;
-		  udelay( i );
-		  if ( ++i == 50  ) {
-			   printk( "[%lu]%sDangnabbbit! Cannot set DE! (DE=%8.8X CCS0=%8.8X)\n", (jiffies-start_time)*10,
-					   pszep0, UDCCS0_DE, Ser0UDCCS0 );
-			   break;
-		  }
-	 }
+	int i = 1;
+
+	while( 1 ) {
+		if ( OK_TO_WRITE ) {
+			Ser0UDCCS0 |= UDCCS0_DE;
+		} else {
+			PRINTKD( "[%lu]%sQuitting set DE because SST or SE set\n", (jiffies-start_time)*10, pszep0 );
+			break;
+		}
+		if ( Ser0UDCCS0 & UDCCS0_DE )
+			break;
+		if ( Ser0UDCCS0 & UDCCS0_DE )
+			break;
+		udelay( i );
+		if ( ++i == 50  ) {
+			printk( "[%lu]Dangnabbbit! Cannot set DE! (DE=%8.8X CCS0=%8.8X)\n", (jiffies-start_time)*10,
+					   UDCCS0_DE, Ser0UDCCS0 );
+			break;
+		}
+	}
 }
 
 static void set_ipr( void )
 {
-	 int i = 1;
-	 while( 1 ) {
-		  if ( OK_TO_WRITE ) {
-				Ser0UDCCS0 |= UDCCS0_IPR;
-		  } else {
-			   PRINTKD( "[%lu]Quitting set IPR because SST or SE set\n", (jiffies-start_time)*10);
-			   break;
-		  }
-		  if ( Ser0UDCCS0 & UDCCS0_IPR )
-			   break;
-		  udelay( i );
-		  if ( ++i == 50  ) {
-			   printk( "[%lu]Dangnabbbit! Cannot set IPR! (IPR=%8.8X CCS0=%8.8X)\n", (jiffies-start_time)*10,
-					   UDCCS0_IPR, Ser0UDCCS0 );
-			   break;
-		  }
-	 }
+	int i = 1;
+	while( 1 ) {
+		if ( OK_TO_WRITE ) {
+			Ser0UDCCS0 |= UDCCS0_IPR;
+		} else {
+			PRINTKD( "[%lu]Quitting set IPR because SST or SE set\n", (jiffies-start_time)*10);
+			break;
+		}
+		if ( Ser0UDCCS0 & UDCCS0_IPR )
+			break;
+		if ( Ser0UDCCS0 & UDCCS0_IPR )
+			break;
+		udelay( i );
+		if ( ++i == 50  ) {
+			printk( "[%lu]Dangnabbbit! Cannot set IPR! (IPR=%8.8X CCS0=%8.8X)\n", (jiffies-start_time)*10,
+					UDCCS0_IPR, Ser0UDCCS0 );
+			break;
+		}
+	}
 }
 
 static void set_ipr_and_de( void )
 {
-	 int i = 1;
-	 while( 1 ) {
-		  if ( OK_TO_WRITE ) {
-			   Ser0UDCCS0 |= BOTH_BITS;
-		  } else {
-			   PRINTKD( "[%lu]%sQuitting set IPR/DE because SST or SE set\n", (jiffies-start_time)*10, pszep0 );
-			   break;
-		  }
-		  if ( (Ser0UDCCS0 & BOTH_BITS) == BOTH_BITS)
-			   break;
-		  udelay( i );
-		  if ( ++i == 50  ) {
-			   printk( "[%lu]%sDangnabbbit! Cannot set DE/IPR! (DE=%8.8X IPR=%8.8X CCS0=%8.8X)\n", (jiffies-start_time)*10,
-					   pszep0, UDCCS0_DE, UDCCS0_IPR, Ser0UDCCS0 );
-			   break;
-		  }
-	 }
+	int i = 1;
+	while( 1 ) {
+		if ( OK_TO_WRITE ) {
+			Ser0UDCCS0 |= BOTH_BITS;
+		} else {
+			PRINTKD( "[%lu]%sQuitting set IPR/DE because SST or SE set\n", (jiffies-start_time)*10, pszep0 );
+			break;
+		}
+		if ( (Ser0UDCCS0 & BOTH_BITS) == BOTH_BITS)
+			break;
+		if ( (Ser0UDCCS0 & BOTH_BITS) == BOTH_BITS)
+			break;
+			
+		udelay( i );
+		if ( ++i == 50  ) {
+			printk( "[%lu]Dangnabbbit! Cannot set DE/IPR! (DE=%8.8X IPR=%8.8X CCS0=%8.8X)\n", (jiffies-start_time)*10,
+				UDCCS0_DE, UDCCS0_IPR, Ser0UDCCS0 );
+			break;
+		}
+	}
 }
 
 static bool clear_opr( void )
 {
-	 int i = 10000;
-	 bool is_clear;
-	 do {
-		  Ser0UDCCS0 = UDCCS0_SO;
-		  is_clear  = ! ( Ser0UDCCS0 & UDCCS0_OPR );
-		  if ( i-- <= 0 ) {
-			   printk( "[%lu]%sclear_opr(): failed\n", (jiffies-start_time)*10, pszep0 );
-			   break;
-		  }
-	 } while( ! is_clear );
-	 return is_clear;
+	int i = 10000;
+	bool is_clear;
+	do {
+		Ser0UDCCS0 = UDCCS0_SO;
+		is_clear  = ! ( Ser0UDCCS0 & UDCCS0_OPR );
+		is_clear  = ! ( Ser0UDCCS0 & UDCCS0_OPR );
+		if ( i-- <= 0 ) {
+			printk( "[%lu]clear_opr(): failed\n", (jiffies-start_time)*10);
+			break;
+		}
+	} while( ! is_clear );
+	return is_clear;
 }

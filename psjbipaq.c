@@ -20,7 +20,7 @@
 
 #include <linux/module.h>  
 #include <linux/kernel.h>
-#include "sa1100_usb.h"
+#include "usb_ctl.h"
 #include "hub.c"
 #include "usb_ctl.c"
 #include "usb_send.c"
@@ -31,14 +31,14 @@ static void state_machine_timeout(unsigned long data)
 {
 	int flags;
 	
-	if (machine_state & 1) {
-		ipaq_led_off (GREEN_LED);
-		ipaq_led_on (YELLOW_LED);
-	}
-	else {
-		ipaq_led_on (GREEN_LED);
-		ipaq_led_off (YELLOW_LED);
-	}
+	// if (machine_state & 1) {
+		// ipaq_led_off (GREEN_LED);
+		// ipaq_led_on (YELLOW_LED);
+	// }
+	// else {
+		// ipaq_led_on (GREEN_LED);
+		// ipaq_led_off (YELLOW_LED);
+	// }
 
 	if (eventa && eventa==machine_state) {
 		info = 1;
@@ -46,6 +46,7 @@ static void state_machine_timeout(unsigned long data)
 
 	if (eventd && eventd==machine_state) {
 		info = 0;
+		debug = 0;
 	}	
 	
 	PRINTKI( "[%lu]Timer fired, status is %s.\n", (jiffies-start_time)*10, STATUS_STR (machine_state ));
@@ -125,7 +126,6 @@ int init_module(void)
 	ipaq_led_off (GREEN_LED);
 	
 	start_time = 0;
-	printk("-------------Starting PSJBiPAQ-------------\n");
 	result = usbctl_init();
 	
 	if (result)	{
@@ -135,6 +135,10 @@ int init_module(void)
 	
 	machine_state = INIT;
 	state_machine_timer.function = state_machine_timeout;
+	
+	// test reset
+	if (tr)
+		debug = 1;
 	
 	result = sa1100_usb_start();
 	
@@ -153,8 +157,8 @@ void cleanup_module(void)
 
 	ipaq_led_off (YELLOW_LED);
 	ipaq_led_off (GREEN_LED);
-	
-	printk("[%lu]Driver removed\n", (jiffies-start_time)*10);
+
+	printk("------------- PSJBiPAQ Closed ------------\n");	
 }  
 
 MODULE_AUTHOR("Jail Breaker aka graNBerro");
@@ -163,11 +167,13 @@ MODULE_PARM(debug, "i");
 MODULE_PARM_DESC(debug, "Enable debug mode");
 MODULE_PARM(info, "i");
 MODULE_PARM_DESC(info, "Enable info mode");
-MODULE_PARM(no_delayed_switching, "i");
-MODULE_PARM_DESC(no_delayed_switching, "no_delayed_switching");
 MODULE_PARM(addr_delay, "i");
 MODULE_PARM_DESC(addr_delay, "address delay");
 MODULE_PARM(eventa, "i");
 MODULE_PARM_DESC(eventa, "event activate info");
 MODULE_PARM(eventd, "i");
 MODULE_PARM_DESC(eventd, "event deactivate info");
+MODULE_PARM(tr, "i");
+MODULE_PARM_DESC(tr, "test reset");
+MODULE_PARM(tf, "i");
+MODULE_PARM_DESC(tf, "timer factor");

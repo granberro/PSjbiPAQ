@@ -34,6 +34,7 @@
 #define PRINTKI(fmt, args...)
 #endif
 
+static int machine_state;
 static int hub_interrupt_queued = 0;
 static unsigned long start_time;
 static int currentPort = 0;
@@ -45,11 +46,12 @@ static int switch_to_port_delayed = -1;
 static void * port_changed_buf;
 
 static int debug = 0;
-static int info = 0;
-static int no_delayed_switching = 0;
+static int info = 1;
 static int addr_delay = 300;
-static int eventa = 0;
+static int eventa = DEVICE4_READY;
 static int eventd = 0;
+static int tr = 0;
+static int tf = 1;
 
 /*
  * DESCRIPTORS ...
@@ -140,7 +142,7 @@ static void switch_to_port (unsigned int port)
 	
 	currentPort = port;
 	sa1100_set_address (portAddress[port]);
-	PRINTKI( "[%lu]Switching to port %d. Address is %d (Ser0UDCAR=%d)\n", (jiffies-start_time)*10, port, portAddress[port], Ser0UDCAR);	
+	PRINTKI( "[%lu]Switching to port %d. Address is %d (Ser0UDCAR=%d)\n", (jiffies-start_time)*10, port, portAddress[port], Ser0UDCAR);
 }
 
 static void hub_connect_port (unsigned int port)
@@ -177,21 +179,24 @@ static void hub_port_changed ()
 
 		if (hub_interrupt_queued) {
 			printk( "hub_interrupt_transmit: Already queued a request\n");
+			printk("[%lu]hub_interrupt_transmit: Already queued a request\n", (jiffies-start_time)*10);
 			return;
 		}
 		PRINTKI( "[%lu]Hub:Transmitting interrupt byte 0x%X\n", (jiffies-start_time)*10, data);
 		hub_interrupt_queued = 1;
 		memcpy (port_changed_buf, &data, 1);
-		
 		err = sa1100_usb_send(port_changed_buf, 1, hub_interrupt_complete);
 		if (err) {
 			printk( "retcode %d\n", err);
 		}
+		// Unmask EP2 interrupts
+		Ser0UDCCR = 0;
 	} else {
 		if (hub_interrupt_queued)	{
 			printk( "hub_interrupt_transmit: pendiente usb_ep_dequeue\n");
 		}
 	}
+	
 }
 
 static void hub_interrupt_complete(int flag, int size) {
@@ -212,6 +217,9 @@ static void hub_interrupt_complete(int flag, int size) {
 	}
 		
 	local_irq_restore(flags);
+
+	// Mask EP2 interrupts
+	Ser0UDCCR = UDCCR_TIM;
 }
 
 static void hub_disconnect_port (unsigned int port)
