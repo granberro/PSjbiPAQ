@@ -78,7 +78,6 @@ enum { kError=-1, kEvSuspend=0, kEvReset=1,
 	   kEvResume=2, kEvAddress=3, kEvConfig=4, kEvDeConfig=5 };
 int usbctl_next_state_on_event( int event );
 static void udc_int_hndlr(int, void *, struct pt_regs *);
-static void udc_disable(void);
 
 /* endpoint zero */
 void ep0_reset(void);
@@ -92,7 +91,7 @@ static void sh_write_with_empty_packet( void ); /* empty packet at end of xfer*/
 static void common_write_preamble( void );
 
 /* other subroutines */
-static __u32  queue_and_start_write( void * p, int req, int act );
+static void queue_and_start_write( void * p, int req, int act );
 static void write_fifo( void );
 static int read_fifo( usb_dev_request_t * p );
 static void get_hub_descriptor( usb_dev_request_t * pReq );
@@ -118,15 +117,13 @@ void ep1_stall(void);
 /* xmitter */
 void ep2_reset(void);
 int  ep2_init(dma_regs_t *chn);
-void ep2_int_hndlr(int status);
+void ep2_int_hndlr(void);
 void ep2_stall(void);
 
 #define UDC_write(reg, val) { \
 	int i = 10000; \
 	do { \
 	  	(reg) = (val); \
-		if ((reg) == (val)) \
-			break; \
 		if (i-- <= 0) { \
 			printk( "%s [%d]: write %#x to %p (%#x) failed\n", \
 				__FUNCTION__, __LINE__, (val), &(reg), (reg)); \
@@ -139,8 +136,6 @@ void ep2_stall(void);
 	int i = 10000; \
 	do { \
 		(reg) |= (val); \
-		if ((reg) & (val)) \
-			break; \
 		if (i-- <= 0) { \
 			printk( "%s [%d]: set %#x of %p (%#x) failed\n", \
 				__FUNCTION__, __LINE__, (val), &(reg), (reg)); \
@@ -153,8 +148,6 @@ void ep2_stall(void);
 	int i = 10000; \
 	do { \
 		(reg) &= ~(val); \
-		if (!((reg) & (val))) \
-			break; \
 		if (i-- <= 0) { \
 			printk( "%s [%d]: clear %#x of %p (%#x) failed\n", \
 				__FUNCTION__, __LINE__, (val), &(reg), (reg)); \
@@ -168,8 +161,6 @@ void ep2_stall(void);
 	(reg) = (val); \
 	do { \
 		(reg) = (val); \
-		if (!((reg) & (val))) \
-			break; \
 		if (i-- <= 0) { \
 			printk( "%s [%d]: flip %#x of %p (%#x) failed\n", \
 				__FUNCTION__, __LINE__, (val), &(reg), (reg)); \
@@ -308,11 +299,7 @@ typedef struct {
 } __attribute__ ((packed)) desc_t;
 
 
-
-void usb_get_hub_descriptor(desc_t * desc);
 static void sa1100_set_address(__u32 address);
-static inline void enable_resume_mask_suspend( void );
-static inline void enable_suspend_mask_resume(void);
 static void core_kicker(void);
 
 #endif /* _USB_CTL_H */

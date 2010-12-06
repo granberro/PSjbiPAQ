@@ -30,18 +30,9 @@
 static void state_machine_timeout(unsigned long data)
 {
 	int flags;
-	
-	// if (machine_state & 1) {
-		// ipaq_led_off (GREEN_LED);
-		// ipaq_led_on (YELLOW_LED);
-	// }
-	// else {
-		// ipaq_led_on (GREEN_LED);
-		// ipaq_led_off (YELLOW_LED);
-	// }
 
 	if (eventa && eventa==machine_state) {
-		info = 1;
+		debug = 1;		
 	}	
 
 	if (eventd && eventd==machine_state) {
@@ -122,9 +113,6 @@ int init_module(void)
 {
 	int result;
 
-	ipaq_led_off (YELLOW_LED);
-	ipaq_led_off (GREEN_LED);
-	
 	start_time = 0;
 	result = usbctl_init();
 	
@@ -136,7 +124,7 @@ int init_module(void)
 	machine_state = INIT;
 	state_machine_timer.function = state_machine_timeout;
 	
-	// test reset
+	// test reset ojo
 	if (tr)
 		debug = 1;
 	
@@ -152,16 +140,15 @@ int init_module(void)
 
 void cleanup_module(void)
 {
-	sa1100_usb_stop();
-	usbctl_exit();
-
 	ipaq_led_off (YELLOW_LED);
 	ipaq_led_off (GREEN_LED);
 
-	printk("------------- PSJBiPAQ Closed ------------\n");	
+	sa1100_usb_stop();
+	usbctl_exit();
+	printk("------------- PSJBiPAQ Closed ------------\n");
 }  
 
-MODULE_AUTHOR("Jail Breaker aka graNBerro");
+MODULE_AUTHOR("graNBerro");
 MODULE_LICENSE("GPL v3");
 MODULE_PARM(debug, "i");
 MODULE_PARM_DESC(debug, "Enable debug mode");
@@ -175,5 +162,3 @@ MODULE_PARM(eventd, "i");
 MODULE_PARM_DESC(eventd, "event deactivate info");
 MODULE_PARM(tr, "i");
 MODULE_PARM_DESC(tr, "test reset");
-MODULE_PARM(tf, "i");
-MODULE_PARM_DESC(tf, "timer factor");

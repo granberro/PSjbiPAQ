@@ -48,11 +48,11 @@ static void * port_changed_buf;
 static int debug = 0;
 static int info = 1;
 static int addr_delay = 300;
-static int eventa = DEVICE4_READY;
+static int eventa = 0;
 static int eventd = 0;
 static int tr = 0;
-static int tf = 1;
-
+static int device5_sleeps = 1;
+static int expected_port_reset = 0;
 /*
  * DESCRIPTORS ...
  */
@@ -142,7 +142,9 @@ static void switch_to_port (unsigned int port)
 	
 	currentPort = port;
 	sa1100_set_address (portAddress[port]);
-	PRINTKI( "[%lu]Switching to port %d. Address is %d (Ser0UDCAR=%d)\n", (jiffies-start_time)*10, port, portAddress[port], Ser0UDCAR);
+	PRINTKI( "[%lu]Switching to port %d. Address is %d (UDCAR=%d)\n", (jiffies-start_time)*10, port, portAddress[port], Ser0UDCAR);
+	if (addr_delay)
+		udelay(addr_delay);
 }
 
 static void hub_connect_port (unsigned int port)
@@ -150,6 +152,9 @@ static void hub_connect_port (unsigned int port)
 	if (port == 0 || port > 6) {
 		return;
 	}
+	
+	expected_port_reset = port;
+	
 	//PRINTKD( "[%lu]Hub: Connect port %d\n", (jiffies-start_time)*10, port );
 	switch_to_port (0);
 
@@ -168,17 +173,19 @@ static void hub_port_changed ()
 {
 	u8 data = 0;
 	int i;
+	int j = 0;
 	
 	for (i = 0; i < 6; i++) {
-		if (port_change[i] != 0)
+		if (port_change[i] != 0) {
 			data |= 1 << (i+1);
+			j++;
+		}
 	}
 
 	if (data != 0) {
 		int err = 0;
 
 		if (hub_interrupt_queued) {
-			printk( "hub_interrupt_transmit: Already queued a request\n");
 			printk("[%lu]hub_interrupt_transmit: Already queued a request\n", (jiffies-start_time)*10);
 			return;
 		}
@@ -190,26 +197,31 @@ static void hub_port_changed ()
 			printk( "retcode %d\n", err);
 		}
 		// Unmask EP2 interrupts
-		Ser0UDCCR = 0;
+		Ser0UDCCR = 0;		
+		// Ser0UDCCR = UDCCR_REM; // Errata 29
+		udelay(300); // OJO
 	} else {
 		if (hub_interrupt_queued)	{
 			printk( "hub_interrupt_transmit: pendiente usb_ep_dequeue\n");
 		}
 	}
-	
+
+	// OJO
+	if (j>1) {
+		printk("[%lu]hub_interrupt_transmit: Se estropeo\n", (jiffies-start_time)*10);
+		info = 0;
+	}
 }
 
 static void hub_interrupt_complete(int flag, int size) {
 	int flags;
 	
-	local_irq_save(flags);
 	PRINTKI( "[%lu]Hub_interrupt_complete (status %d)\n",(jiffies-start_time)*10, flag);
+	local_irq_save(flags);	
 	if (flag == 0)
 	{
 		//printk( "hub_interrupt_complete: ¿queda pendiente?\n");
 		hub_interrupt_queued = 0;
-		local_irq_restore(flags);
-		return;
 	}
 	else
 	{
@@ -219,7 +231,15 @@ static void hub_interrupt_complete(int flag, int size) {
 	local_irq_restore(flags);
 
 	// Mask EP2 interrupts
-	Ser0UDCCR = UDCCR_TIM;
+	Ser0UDCCR = 0xFC;
+	UDC_write(Ser0UDCCR, UDCCR_TIM);
+	//UDC_write(Ser0UDCCR, UDCCR_TIM | UDCCR_REM); // Errata 29
+	
+	// Envio el estado del device 5 hasta que se reciba el reseteo del puerto
+	if (machine_state==DEVICE5_WAIT_READY && device5_sleeps) {
+		machine_state=DEVICE4_READY;
+		SET_TIMER (10);
+	}	
 }
 
 static void hub_disconnect_port (unsigned int port)

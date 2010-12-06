@@ -34,7 +34,7 @@ typedef struct {
 
 static struct timer_list state_machine_timer;
 #define msecs_to_jiffies(ms) (((ms)*HZ+999)/1000)
-#define SET_TIMER(ms)  PRINTKI( "[%lu]Setting timer to %d ms - Ojo revisar timers\n", (jiffies-start_time)*10, ms );  \
+#define SET_TIMER(ms)  PRINTKI( "[%lu]Setting timer to %d ms\n", (jiffies-start_time)*10, ms );  \
 mod_timer (&state_machine_timer, jiffies + msecs_to_jiffies(ms))
 
 #define USB_DT_HUB_HEADER_SIZE(n)	(sizeof(struct usb_hub_header_descriptor))

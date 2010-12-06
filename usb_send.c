@@ -161,30 +161,28 @@ int ep2_init(dma_regs_t *chn)
 
 void ep2_reset(void)
 {
-	desc_t pd;
 	if (currentPort) {
 		tx_pktsize = 8; // OJO
 	}
 	else
 	{
-		usb_get_hub_descriptor(&pd);
-		tx_pktsize = __le16_to_cpu( pd.b.ep2.wMaxPacketSize );
-	}	
+		tx_pktsize = 1;
+	}
+	
 	UDC_clear(Ser0UDCCS2, UDCCS2_FST);
 	sa1100_clear_dma(dmachn_tx);
 	ep2_done(-EINTR);
 }
 
-void ep2_int_hndlr(int udcsr)
+void ep2_int_hndlr()
 {
 	int status = Ser0UDCCS2;
-
-	//printk("ep2_int int:%02x status %02x \n", udcsr, status);
 
 	if (Ser0UDCAR != portAddress[currentPort]) // check for stupid silicon bug.
 		Ser0UDCAR = portAddress[currentPort];
 
-	UDC_flip(Ser0UDCCS2, UDCCS2_SST);
+	//UDC_flip(Ser0UDCCS2, UDCCS2_SST);
+	UDC_flip(Ser0UDCCS2, UDCCS2_SST | UDCCS2_TPC);
 
 	if (status & UDCCS2_TPC) {
 		sa1100_clear_dma(dmachn_tx);
@@ -208,7 +206,7 @@ void ep2_int_hndlr(int udcsr)
 			}
 		}
 	} else {
-		printk("usb_send: Not TPC: UDCCS2 = %x\n", status);
+		PRINTKD("usb_send: Not TPC: UDCCS2 = %x\n", status);
 	}
 }
 

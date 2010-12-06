@@ -94,11 +94,9 @@ Inline Helpers
 
 /* Data extraction from usb_request_t fields */
 enum { kTargetDevice=0, kTargetInterface=1, kTargetEndpoint=2 };
-static inline int request_target( __u8 b ) { return (int) ( b & 0x0F); }
 
-static inline int windex_to_ep_num( __u16 w ) { return (int) ( w & 0x000F); }
+// static inline int windex_to_ep_num( __u16 w ) { return (int) ( w & 0x000F); }
 inline int type_code_from_request( __u8 by ) { return (( by >> 4 ) & 3); }
-
 
 #if VERBOSITY
 /* "pcs" == "print control status" */
@@ -124,6 +122,7 @@ static inline void pcs( void ){}
 Globals
 ***************************************************************************/
 static const char pszep0[] = "usbep0: ";
+static int last_port_reset = 0;
 
 /* pointer to current setup handler */
 static void (*current_handler)(void) = sh_setup_begin;
@@ -146,7 +145,7 @@ void ep0_reset(void)
 /* handle interrupt for endpoint zero */
 void ep0_int_hndlr( void )
 {
-	 PRINTKD( "[%lu]In  /\\(%d)\t", (jiffies-start_time)*10, Ser0UDCAR );
+	 PRINTKD( "[%lu]In  /\\(%d)\t", (jiffies-start_time)*10, Ser0UDCAR);
 
 	 if (debug)
 		pcs();
@@ -157,19 +156,19 @@ void ep0_int_hndlr( void )
 	if ( current_handler != sh_setup_begin ) {
 		common_write_preamble();
 	}
-	else {
-		// If ep0 is idle state, process port change
-		if (switch_to_port_delayed >= 0) {
-			//printk( "[%lu]sm\n", (jiffies-start_time)*10);
-			state_machine_timeout(0);
-		}
-	}
+	// else {
+		// // If ep0 is idle state, process delayed port change
+		// if (switch_to_port_delayed >= 0) {
+			// PRINTKI( "[%lu]Setting timer to 0 ms\n", (jiffies-start_time)*10);
+			// state_machine_timeout(0);
+		// }
+	// }
 
 	(*current_handler)();
 
 	 PRINTKD( "[%lu]Out \\/(%d)\t" , (jiffies-start_time)*10, Ser0UDCAR );
 	 if (debug)
-		pcs();	 
+		pcs();
 }
 
 /***************************************************************************
@@ -193,26 +192,38 @@ static void sh_setup_begin( void )
 	u16 status;
 	u16 change;
 	int n;
-	__u32 cs_bits;
 	__u32 address;
 	__u32 cs_reg_in = Ser0UDCCS0;
 	
 	if (cs_reg_in & UDCCS0_SST) {
-		PRINTKD( "[%lu]%ssetup begin: sent stall. Continuing\n", (jiffies-start_time)*10, pszep0);
+		PRINTKD( "[%lu]setup begin: sent stall. Continuing\n", (jiffies-start_time)*10);
 		set_cs_bits( UDCCS0_SST );
 	}
 
 	if ( cs_reg_in & UDCCS0_SE ) {
-		PRINTKD( "[%lu]%ssetup begin: Early term of setup. Continuing EP0 %d\n", (jiffies-start_time)*10, pszep0, 
-				cs_reg_in);
+		PRINTKD( "[%lu]setup begin: Early term of setup. Continuing\n", (jiffies-start_time)*10);
 		set_cs_bits( UDCCS0_SSE );  		 /* clear setup end */
 	}
 
-	/* Be sure out packet ready, otherwise something is wrong */
+	/* Handle iddle status events and delayed actions */
 	if ((cs_reg_in & UDCCS0_OPR) == 0 ) {
-		/* we can get here early...if so, we'll int again in a moment  */
-		// PRINTKD( "[%lu]%ssetup begin: no OUT packet available. Exiting EP0 %d\n", (jiffies-start_time)*10, pszep0,
-				// cs_reg_in);
+		// Set address woodoo
+		if (Ser0UDCAR != portAddress[currentPort]) {
+			Ser0UDCAR = portAddress[currentPort];
+			PRINTKD("[%lu]Apply address %d - %d\n", (jiffies-start_time)*10, portAddress[currentPort], Ser0UDCAR);			
+		}
+		
+		// EP2 Complete (TPC means packet sent) . Ep2 interrupt does not work fine
+		if (Ser0UDCCS2 & UDCCS2_TPC || hub_interrupt_queued) {
+			ep2_int_hndlr();
+		}		
+		
+		// Port reset, send change
+		if (last_port_reset) {
+			hub_port_changed();
+			last_port_reset = 0;
+			expected_port_reset = 0;
+		}
 		goto sh_sb_end;
 	}
 
@@ -232,11 +243,11 @@ static void sh_setup_begin( void )
 	 // PRINTKD( "[%lu]%2.2X %2.2X %2.2X %2.2X %2.2X %2.2X %2.2X %2.2X ", (jiffies-start_time)*10,
 			 // pdb[0], pdb[1], pdb[2], pdb[3], pdb[4], pdb[5], pdb[6], pdb[7]
 		  // );
-	 // if (jope)
+	 // if (debug)
 		// preq( &req );
 	 // }
 // #endif	
-	
+
 	/* Is it a standard or class request ? (not vendor or reserved request) */
 	request_type = type_code_from_request( req.bmRequestType );
 
@@ -321,8 +332,9 @@ unknown:
 				usbd_info.state = USB_STATE_CONFIGURED;
 				hub_interrupt_queued = 0;
 				PRINTKI("[%lu]reset config\n", (jiffies-start_time)*10);
-				Ser0UDCOMP = 7;
-				Ser0UDCIMP = 7;
+				//Ser0UDCOMP = 7; OJO
+				//Ser0UDCIMP = 7; OJO
+
 			} else if ( req.wValue == 0 ) {
 				printk( "[%lu]%ssetup phase: Unknown "
 					"\"set configuration\" data %d\n", (jiffies-start_time)*10, pszep0, req.wValue );
@@ -330,58 +342,58 @@ unknown:
 			set_cs_bits( UDCCS0_DE | UDCCS0_SO );
 			break;
 		case CLEAR_FEATURE:
-			/* could check data length, direction...26Jan01ww */
-			if ( req.wValue == 0 ) { /* clearing ENDPOINT_HALT/STALL */
-				int ep = windex_to_ep_num( req.wIndex );
-				if ( ep == 1 ) {
-					printk( "[%lu]%sclear feature \"endpoint halt\" "
-						" on receiver\n", (jiffies-start_time)*10, pszep0 );
-					ep1_reset();
-				}
-				else if ( ep == 2 ) {
-					printk( "[%lu]%sclear feature \"endpoint halt\" "
-						"on xmitter\n", (jiffies-start_time)*10, pszep0 );
-					ep2_reset();
-				} else {
-					printk( "[%lu]%sclear feature \"endpoint halt\" "
-						"on unsupported ep # %d\n", (jiffies-start_time)*10,	pszep0, ep );
-				}
-			} else {
-				printk( "[%lu]%sUnsupported feature selector (%d) in clear feature. Ignored.\n", 
-					(jiffies-start_time)*10,	pszep0, req.wValue );
-			}
+			// /* could check data length, direction...26Jan01ww */
+			// if ( req.wValue == 0 ) { /* clearing ENDPOINT_HALT/STALL */
+				// int ep = windex_to_ep_num( req.wIndex );
+				// if ( ep == 1 ) {
+					// printk( "[%lu]%sclear feature \"endpoint halt\" "
+						// " on receiver\n", (jiffies-start_time)*10, pszep0 );
+					// ep1_reset();
+				// }
+				// else if ( ep == 2 ) {
+					// printk( "[%lu]%sclear feature \"endpoint halt\" "
+						// "on xmitter\n", (jiffies-start_time)*10, pszep0 );
+					// ep2_reset();
+				// } else {
+					// printk( "[%lu]%sclear feature \"endpoint halt\" "
+						// "on unsupported ep # %d\n", (jiffies-start_time)*10,	pszep0, ep );
+				// }
+			// } else {
+				// printk( "[%lu]%sUnsupported feature selector (%d) in clear feature. Ignored.\n", 
+					// (jiffies-start_time)*10,	pszep0, req.wValue );
+			// }
 			set_cs_bits( UDCCS0_DE | UDCCS0_SO );
 			break;
 		case SET_FEATURE:
-			if ( req.wValue == 0 ) { /* setting ENDPOINT_HALT/STALL */
-				int ep = windex_to_ep_num( req.wValue );
-				if ( ep == 1 ) {
-					printk( "[%lu]%set feature \"endpoint halt\" "
-						"on receiver\n", (jiffies-start_time)*10, pszep0 );
-					ep1_stall();
-				}
-				else if ( ep == 2 ) {
-					printk( "[%lu]%sset feature \"endpoint halt\" "
-						" on xmitter\n", (jiffies-start_time)*10, pszep0 );
-					ep2_stall();
-				} else {
-					printk( "[%lu]%sset feature \"endpoint halt\" "
-						"on unsupported ep # %d\n", (jiffies-start_time)*10,	pszep0, ep );
-				}
-			}
-			else {
-				printk( "[%lu]%sUnsupported feature selector (%d) in set feature\n", 
-						(jiffies-start_time)*10, pszep0, req.wValue );
-				set_cs_bits( UDCCS0_SST );
-				goto sh_sb_end;
-			}
+			// if ( req.wValue == 0 ) { /* setting ENDPOINT_HALT/STALL */
+				// int ep = windex_to_ep_num( req.wValue );
+				// if ( ep == 1 ) {
+					// printk( "[%lu]%set feature \"endpoint halt\" "
+						// "on receiver\n", (jiffies-start_time)*10, pszep0 );
+					// ep1_stall();
+				// }
+				// else if ( ep == 2 ) {
+					// printk( "[%lu]%sset feature \"endpoint halt\" "
+						// " on xmitter\n", (jiffies-start_time)*10, pszep0 );
+					// ep2_stall();
+				// } else {
+					// printk( "[%lu]%sset feature \"endpoint halt\" "
+						// "on unsupported ep # %d\n", (jiffies-start_time)*10,	pszep0, ep );
+				// }
+			// }
+			// else {
+				// printk( "[%lu]%sUnsupported feature selector (%d) in set feature\n", 
+						// (jiffies-start_time)*10, pszep0, req.wValue );
+				// set_cs_bits( UDCCS0_SST );
+				// goto sh_sb_end;
+			// }
 			set_cs_bits( UDCCS0_DE | UDCCS0_SO );
 			break;
 		case GET_STATUS:
 			/* return status bit flags */
 			status_buf[0] = status_buf[1] = 0;
-			n = request_target(req.bmRequestType);
-			switch( n ) {
+
+			switch( req.bmRequestType & 0x0f ) {
 			case kTargetDevice:
 				status_buf[0] |= 1;
 				break;
@@ -389,36 +401,33 @@ unknown:
 				break;
 			case kTargetEndpoint:
 				/* return stalled bit */
-				n = windex_to_ep_num( req.wIndex );
-				if ( n == 1 )
-				status_buf[0] |= (Ser0UDCCS1 & UDCCS1_FST) >> 4;
-				else if ( n == 2 )
-				status_buf[0] |= (Ser0UDCCS2 & UDCCS2_FST) >> 5;
-				else {
-					printk( "[%lu]%sUnknown endpoint (%d) "
-						"in GET_STATUS\n", (jiffies-start_time)*10, pszep0, n );
-				}
+				// n = windex_to_ep_num( req.wIndex );
+				// if ( n == 1 )
+					// status_buf[0] |= (Ser0UDCCS1 & UDCCS1_FST) >> 4;
+				// else if ( n == 2 )
+					// status_buf[0] |= (Ser0UDCCS2 & UDCCS2_FST) >> 5;
+				// else {
+					// printk( "[%lu]%sUnknown endpoint (%d) "
+						// "in GET_STATUS\n", (jiffies-start_time)*10, pszep0, n );
+				// }
 				break;
 			default:
 				printk( "[%lu]%sUnknown target (%d) in GET_STATUS\n", (jiffies-start_time)*10, pszep0, n );
 				/* fall thru */
 				break;
 			}
-			cs_bits  = queue_and_start_write( status_buf, req.wLength, 	sizeof( status_buf ) );
-			set_cs_bits( cs_bits );			
+			queue_and_start_write(status_buf, req.wLength, sizeof(status_buf));
 			break;
 		case GET_DESCRIPTOR:
 			get_hub_descriptor( &req );
 			break;
 		case GET_CONFIGURATION:
 			status_buf[0] = (usbd_info.state ==  USB_STATE_CONFIGURED) 	? 1 : 0;
-			cs_bits = queue_and_start_write( status_buf, req.wLength, 1 );
-			set_cs_bits( cs_bits );
+			queue_and_start_write( status_buf, req.wLength, 1 );			
 			break;
 		case GET_INTERFACE:
 			printk( "[%lu]%sfixme: get interface not supported\n", (jiffies-start_time)*10, pszep0 );
-			cs_bits = queue_and_start_write( NULL, req.wLength, 0 );
-			set_cs_bits( cs_bits );
+			queue_and_start_write( NULL, req.wLength, 0 );			
 			break;
 		case SET_INTERFACE:
 			printk( "[%lu]%sfixme: set interface not supported\n", (jiffies-start_time)*10, pszep0 );
@@ -462,23 +471,23 @@ unknown:
 					switch (machine_state) {
 					case DEVICE1_WAIT_DISCONNECT:
 						machine_state = DEVICE1_DISCONNECTED;
-						SET_TIMER (200/tf);
+						SET_TIMER (200);
 						break;
 					case DEVICE2_WAIT_DISCONNECT:
 						machine_state = DEVICE2_DISCONNECTED;
-						SET_TIMER (170/tf);
+						SET_TIMER (110);
 						break;
 					case DEVICE3_WAIT_DISCONNECT:
 						machine_state = DEVICE3_DISCONNECTED;
-						SET_TIMER (450/tf);
+						SET_TIMER (450);
 						break;
 					case DEVICE4_WAIT_DISCONNECT:
 						machine_state = DEVICE4_DISCONNECTED;
-						SET_TIMER (200/tf);
+						SET_TIMER (200);
 						break;
 					case DEVICE5_WAIT_DISCONNECT:
 						machine_state = DEVICE5_DISCONNECTED;
-						SET_TIMER (200/tf);
+						SET_TIMER (200);
 						break;
 					default:
 						break;
@@ -515,6 +524,9 @@ unknown:
 					/* Delay switching the port because we first need to response
 									to this request with the proper address */
 					set_cs_bits( UDCCS0_DE | UDCCS0_SO );
+					if (switch_to_port_delayed >= 0) {
+						SET_TIMER (0);
+					}					
 					break;
 				}					
 				break;
@@ -531,13 +543,16 @@ unknown:
 				change = port_change[req.wIndex - 1];
 				break;
 			}
+			// Stop requesting device5 status
+			if (req.wIndex==5) {
+				device5_sleeps = 0;
+			}						
 			status = cpu_to_le16 (status);
 			change = cpu_to_le16 (change);
+			PRINTKI( "[%lu]GetHub/PortStatus: transmiting status %d change %d\n", (jiffies-start_time)*10, status+1024, change);			
 			memcpy(status_buf2, &status, sizeof(u16));
-			memcpy(status_buf2 + sizeof(u16), &change, sizeof(u16));			
-			cs_bits  = queue_and_start_write( status_buf2, req.wLength,	sizeof( status_buf2) );
-			set_cs_bits( cs_bits );			
-			PRINTKI( "[%lu]GetHub/PortStatus: transmiting status %d change %d\n", (jiffies-start_time)*10, status+1024, change);
+			memcpy(status_buf2 + sizeof(u16), &change, sizeof(u16));
+			queue_and_start_write( status_buf2, req.wLength,	sizeof( status_buf2) );
 			break;
 		case SET_FEATURE: // 0x03
 			switch (req.bmRequestType & 0x1f) {
@@ -563,19 +578,22 @@ unknown:
 				}
 				switch (req.wValue) {
 				case 4: /* PORT_RESET */
-					PRINTKI( "[%lu]SetPortFeature PORT_RESET called\n", (jiffies-start_time)*10);
+					PRINTKI( "[%lu]SetPortFeature PORT_RESET called (%d %d)\n", (jiffies-start_time)*10, expected_port_reset, req.wIndex);
 					port_change[req.wIndex-1] |= PORT_STAT_C_RESET;					
 					set_cs_bits( UDCCS0_DE | UDCCS0_SO );
-					hub_port_changed ();
+					// There seem to be port resets to other port
+					if (expected_port_reset == req.wIndex) {
+						last_port_reset = req.wIndex;
+					}
 					break;
 				case 8: /* PORT_POWER */
 					PRINTKI( "[%lu]SetPortFeature PORT_POWER called\n", (jiffies-start_time)*10);
 					port_status[req.wIndex-1] |= PORT_STAT_POWER;
-					set_cs_bits( UDCCS0_DE | UDCCS0_SO );
 					if (machine_state == INIT && req.wIndex == 6) {
 						machine_state = HUB_READY;
-						SET_TIMER (150/tf);
+						SET_TIMER (15);
 					}					
+					set_cs_bits( UDCCS0_DE | UDCCS0_SO );
 					break;
 				case 0: /* PORT_CONNECTION */
 				case 1: /* PORT_ENABLE */
@@ -592,8 +610,8 @@ unknown:
 					set_cs_bits( UDCCS0_DE | UDCCS0_SO );
 					break;
 				default:
-					set_cs_bits( UDCCS0_DE | UDCCS0_SO );
 					printk( "[%lu]%s: set port feature %02x not supported\n", (jiffies-start_time)*10, pszep0, req.wValue);
+					set_cs_bits( UDCCS0_DE | UDCCS0_SO );					
 					break;
 				} // (req.wValue)
 				break;
@@ -607,8 +625,8 @@ unknown:
 	if (timer_added == 0) {
     	add_timer (&state_machine_timer);
   		timer_added = 1;
-	}	
-	
+	}
+
 sh_sb_end:
 	return;
 }
@@ -695,15 +713,17 @@ static void sh_write()
 		..so just set DE and we are done */
 
 	 if ( 0 == wr.bytes_left ) {
-		  /* that's it, so data end  */
-		  set_de();
-		  wr.p = NULL;  				/* be anal */
-		  current_handler = sh_setup_begin;
-	 } else {
+		/* that's it, so data end  */
+		set_de();
+		wr.p = NULL;  				/* be anal */
+		current_handler = sh_setup_begin;
+	} else {
 		  /* Otherwise, more data to go */
 		  write_fifo();
 		  set_ipr();
-	 }
+	}
+	 
+	udelay(300);
 }
 /*
  * sh_write_with_empty_packet()
@@ -715,7 +735,6 @@ static void sh_write()
  */
 static void sh_write_with_empty_packet( void )
 {
-	__u32 cs_reg_out = 0;
 	PRINTKD( "[%lu]WE\n", (jiffies-start_time)*10);
 
 	if ( Ser0UDCCS0 & UDCCS0_IPR ) {
@@ -727,19 +746,19 @@ static void sh_write_with_empty_packet( void )
 		..interrupt after the last packet went out.
 		..we must do short packet suff, so set DE and IPR
 	*/
-
 	if ( 0 == wr.bytes_left ) {
-		set_ipr_and_de();
 		wr.p = NULL;
 		current_handler = sh_setup_begin;
 		PRINTKD( "[%lu]sh_write empty() Sent empty packet \n", (jiffies-start_time)*10);
+		set_ipr_and_de();
 	}
 	else {
 		write_fifo();				/* send data */
 		set_ipr();				/* flag a packet is ready */
 	}
-	
-	Ser0UDCCS0 = cs_reg_out;
+
+	//Ser0UDCCS0 = 0;
+	udelay(300); // Ojo funciona en Ubuntu
 }
 
 /***************************************************************************
@@ -750,24 +769,24 @@ Other Private Subroutines
  * p == data to send
  * req == bytes host requested
  * act == bytes we actually have
- * Returns: bits to be flipped in ep0 control/status register
  *
  * Called from sh_setup_begin() to begin a data return phase. Sets up the
  * global "wr"-ite structure and load the outbound FIFO with data.
  * If can't send all the data, set appropriate handler for next interrupt.
  *
  */
-static __u32  queue_and_start_write( void * in, int req, int act )
+static void  queue_and_start_write( void * in, int req, int act )
 {
 	__u32 cs_reg_bits = UDCCS0_IPR;
 	unsigned char * p = (unsigned char*) in;
 
-	PRINTKD( "[%lu]Qr=%d a=%d\n", (jiffies-start_time)*10, req, act);
+	PRINTKD( "[%lu]Qr=%d a=%d %d\n", (jiffies-start_time)*10, req, act, Ser0UDCCS0);
 
 	/* thou shalt not enter data phase until the serviced OUT is clear */
 	if ( ! clear_opr() ) {
 		printk( "[%lu]%sSO did not clear OPR\n", (jiffies-start_time)*10, pszep0 );
-		return ( UDCCS0_DE | UDCCS0_SO ) ;
+		set_cs_bits ( UDCCS0_DE | UDCCS0_SO );
+		return ;
 	}
 	
 	if (0 != wr.bytes_left) {
@@ -790,7 +809,9 @@ static __u32  queue_and_start_write( void * in, int req, int act )
 		current_handler = sh_write;
 	}
 
-	return cs_reg_bits; /* note: IPR was set uncondtionally at start of routine */
+	set_cs_bits( cs_reg_bits ); /* note: IPR was set uncondtionally at start of routine */
+	
+	udelay(300);
 }
 /*
  * write_fifo()
@@ -829,6 +850,7 @@ static void write_fifo( void )
 		 if ( i == 10 ) {
 			printk( "[%lu]Write_fifo: write failure byte %d. CCR %d CSR %d CS0 %d\n", (jiffies-start_time)*10, bytes_written+1,
 				Ser0UDCCR, Ser0UDCSR, Ser0UDCCS0);
+			hub_interrupt_queued = 0;
 		 }
 
 		 wr.p++;
@@ -888,56 +910,57 @@ static int read_fifo( usb_dev_request_t * request )
  * for a GET_DESCRIPTOR setup request for the hub
  */
 static void get_hub_descriptor( usb_dev_request_t * pReq ) {
-	__u32 cs_bits = 0;
-	ep_desc_t * pEndpoint;
-	desc_t pDesc;
 	int value = 0;
-
 	int type = pReq->wValue >> 8;
 	int idx  = pReq->wValue & 0xFF;
 
-	usb_get_hub_descriptor(&pDesc);
-
 	switch( type ) {
 	case USB_DESC_DEVICE:
-		cs_bits = queue_and_start_write( &pDesc.dev, pReq->wLength, pDesc.dev.bLength );
-		value = pDesc.dev.bLength ;
+		value = min(pReq->wLength, (u16)hub_device_desc.bLength);
+		memcpy(desc_buf, &hub_device_desc, value);
 		break;
-		// return config descriptor buffer, cfg, intf, 2 ep
 	case USB_DESC_CONFIG:
-		cs_bits = queue_and_start_write( &pDesc.b, pReq->wLength, pDesc.b.cfg.wTotalLength );
-		value = pDesc.b.cfg.wTotalLength ;
+		value = min(pReq->wLength, (u16) hub_config_desc.wTotalLength);
+		memcpy(desc_buf, &hub_config_desc, value);
 		break;
 	case USB_DESC_STRING:
-		printk( "[%lu]%sChungo-Undo.Return string %d: ", (jiffies-start_time)*10, pszep0, idx );
+		printk( "[%lu]%sChungo. Desc string\n", (jiffies-start_time)*10, pszep0);
 		break;
 	case USB_DESC_INTERFACE:
-		if ( idx == pDesc.b.intf.bInterfaceNumber ) {
-			cs_bits = queue_and_start_write( &pDesc.b.intf, pReq->wLength, pDesc.b.intf.bLength );
-			value = pDesc.b.intf.bLength  ;
-		}
+		printk( "[%lu]%sChungo Desc interface\n", (jiffies-start_time)*10, pszep0);
+		// if ( idx == hub_interface_desc.bInterfaceNumber ) {
+			// value = min(pReq->wLength, (u16) hub_interface_desc.bLength);
+			// memcpy(desc_buf, &hub_interface_desc, value);
+			// queue_and_start_write( hub_interface_desc, pReq->wLength, value);			
+		// }
 		break;
 	case USB_DESC_ENDPOINT: /* correct? 21Feb01ww */
-		if ( idx == 1 )
-			pEndpoint = &pDesc.b.ep1;
-		else if ( idx == 2 )
-			pEndpoint = &pDesc.b.ep2;
-		else
-			pEndpoint = NULL;
-		if ( pEndpoint ) {
-			cs_bits = queue_and_start_write( pEndpoint, pReq->wLength, pEndpoint->bLength );
-			value = pEndpoint->bLength;
-		} else {
-			printk("[%lu]%sunkown endpoint index %d Stall.\n", (jiffies-start_time)*10, pszep0, idx );
-			cs_bits = ( UDCCS0_DE | UDCCS0_SO | UDCCS0_FST );
-		}
+		printk( "[%lu]%sChungo Desc endpoint %d\n", (jiffies-start_time)*10, pszep0, idx);
+		// if ( idx == 1 ) {
+			// value = min(pReq->wLength, (u16) hub_endpoint_1.bLength);
+			// memcpy(desc_buf, &hub_endpoint_1, value);
+		// }
+		// else if ( idx == 2 ) {
+			// value = min(pReq->wLength, (u16) hub_endpoint_2.bLength);
+			// memcpy(desc_buf, &hub_endpoint_2, value);
+		// }
+		// else
+			// printk("[%lu]%sunkown endpoint index %d Stall.\n", (jiffies-start_time)*10, pszep0, idx );
+			// cs_bits = ( UDCCS0_DE | UDCCS0_SO | UDCCS0_FST );
+		// }
 		break;
 	default :
 			printk("[%lu]%sunknown descriptor type %d. Stall.\n", (jiffies-start_time)*10, pszep0, type );
-			cs_bits = ( UDCCS0_DE | UDCCS0_SO | UDCCS0_FST );
+			set_cs_bits ( UDCCS0_DE | UDCCS0_SO | UDCCS0_FST );
+			return;
 		break;
 	}
-	set_cs_bits( cs_bits );
+	if (value > 0) {
+		queue_and_start_write(desc_buf, pReq->wLength, value);
+	}
+	else {
+		set_cs_bits ( UDCCS0_DE | UDCCS0_SO);
+	}
 }
 
 /*
@@ -946,7 +969,6 @@ static void get_hub_descriptor( usb_dev_request_t * pReq ) {
  * for a GET_DESCRIPTOR setup request for the hub
  */
 static void get_device_descriptor(usb_dev_request_t * pReq) {
-	__u32 cs_bits = 0;
 	int value = -EOPNOTSUPP;
 	int type = pReq->wValue >> 8;
 	int idx  = pReq->wValue & 0xFF;
@@ -998,6 +1020,7 @@ static void get_device_descriptor(usb_dev_request_t * pReq) {
 				if (idx == (PORT1_NUM_CONFIGS-1) && pReq->wLength > 8) {
 					machine_state = DEVICE1_READY;
 					switch_to_port_delayed = 0;
+					SET_TIMER (100); // log 90 jb 100
 				}
 			}
 			PRINTKD( "[%lu]Device Req type %d, idx %d reqlen %d serve %d\n", (jiffies-start_time)*10, type, idx, pReq->wLength, value);
@@ -1008,6 +1031,7 @@ static void get_device_descriptor(usb_dev_request_t * pReq) {
 			if (pReq->wLength > 8) {
 				machine_state = DEVICE2_READY;
 				switch_to_port_delayed = 0;
+				SET_TIMER (10); // log 0 jb 150
 			}
 			break;
 		case 3:
@@ -1016,6 +1040,7 @@ static void get_device_descriptor(usb_dev_request_t * pReq) {
 			if (idx == 1 && pReq->wLength > 8) {
 				machine_state = DEVICE3_READY;
 				switch_to_port_delayed = 0;
+				SET_TIMER (70); //log 60 jb 80
 			}
 			break;
 		case 4:
@@ -1036,6 +1061,7 @@ static void get_device_descriptor(usb_dev_request_t * pReq) {
 				if (pReq->wLength > 8) {
 					machine_state = DEVICE4_READY;
 					switch_to_port_delayed = 0;
+					SET_TIMER (10); // log 0 jb 180
 				}
 			}
 			break;
@@ -1065,16 +1091,13 @@ static void get_device_descriptor(usb_dev_request_t * pReq) {
 		}
 		break;		
 	}
-
+	
 	if (value > 0) {
-		cs_bits = queue_and_start_write( desc_buf, pReq->wLength, value);
+		queue_and_start_write(desc_buf, pReq->wLength, value);
 	}
 	else {
-		cs_bits = ( UDCCS0_DE | UDCCS0_SO);
+		set_cs_bits( UDCCS0_DE | UDCCS0_SO);
 	}
-
-	set_cs_bits( cs_bits );
-
 }
 
 /* some voodo I am adding, since the vanilla macros just aren't doing it  1Mar01ww */
@@ -1086,13 +1109,13 @@ static void get_device_descriptor(usb_dev_request_t * pReq) {
 static void set_cs_bits( __u32 bits )
 {
 	 if ( bits & ( UDCCS0_SO | UDCCS0_SSE | UDCCS0_FST ) )
-		  Ser0UDCCS0 = bits;
+		Ser0UDCCS0 = bits;
 	 else if ( (bits & BOTH_BITS) == BOTH_BITS )
-		  set_ipr_and_de();
+		set_ipr_and_de();
 	 else if ( bits & UDCCS0_IPR )
-		  set_ipr();
+		set_ipr();
 	 else if ( bits & UDCCS0_DE )
-		  set_de();
+		set_de();
 }
 
 static void set_de( void )
@@ -1103,11 +1126,9 @@ static void set_de( void )
 		if ( OK_TO_WRITE ) {
 			Ser0UDCCS0 |= UDCCS0_DE;
 		} else {
-			PRINTKD( "[%lu]%sQuitting set DE because SST or SE set\n", (jiffies-start_time)*10, pszep0 );
+			PRINTKI( "[%lu]%sQuitting set DE because SST or SE set\n", (jiffies-start_time)*10, pszep0 );
 			break;
 		}
-		if ( Ser0UDCCS0 & UDCCS0_DE )
-			break;
 		if ( Ser0UDCCS0 & UDCCS0_DE )
 			break;
 		udelay( i );
@@ -1126,11 +1147,10 @@ static void set_ipr( void )
 		if ( OK_TO_WRITE ) {
 			Ser0UDCCS0 |= UDCCS0_IPR;
 		} else {
-			PRINTKD( "[%lu]Quitting set IPR because SST or SE set\n", (jiffies-start_time)*10);
+			PRINTKI( "[%lu]Quitting set IPR because SST or SE set (%d)\n", (jiffies-start_time)*10, Ser0UDCCS0);
+			debug=0;
 			break;
 		}
-		if ( Ser0UDCCS0 & UDCCS0_IPR )
-			break;
 		if ( Ser0UDCCS0 & UDCCS0_IPR )
 			break;
 		udelay( i );
@@ -1149,11 +1169,9 @@ static void set_ipr_and_de( void )
 		if ( OK_TO_WRITE ) {
 			Ser0UDCCS0 |= BOTH_BITS;
 		} else {
-			PRINTKD( "[%lu]%sQuitting set IPR/DE because SST or SE set\n", (jiffies-start_time)*10, pszep0 );
+			PRINTKI( "[%lu]%sQuitting set IPR/DE because SST or SE set (%d)\n", (jiffies-start_time)*10, pszep0, Ser0UDCCS0);
 			break;
 		}
-		if ( (Ser0UDCCS0 & BOTH_BITS) == BOTH_BITS)
-			break;
 		if ( (Ser0UDCCS0 & BOTH_BITS) == BOTH_BITS)
 			break;
 			
@@ -1172,7 +1190,6 @@ static bool clear_opr( void )
 	bool is_clear;
 	do {
 		Ser0UDCCS0 = UDCCS0_SO;
-		is_clear  = ! ( Ser0UDCCS0 & UDCCS0_OPR );
 		is_clear  = ! ( Ser0UDCCS0 & UDCCS0_OPR );
 		if ( i-- <= 0 ) {
 			printk( "[%lu]clear_opr(): failed\n", (jiffies-start_time)*10);

@@ -33,7 +33,7 @@ static int tx_pktsize;
 static int rx_pktsize;
 static int timer_added = 0;
 static void * desc_buf;
-
+static int second_reset = 0;
 #define USB_BUFSIZ 4096
 
 /* The port1 configuration descriptor. dynamically loaded from procfs */
@@ -53,33 +53,49 @@ static void udc_int_hndlr(int irq, void *dev_id, struct pt_regs *regs)
 	if (start_time==0) {
 		start_time = jiffies;
 	}
+	
+	//PRINTKD("[%lu]Status %d Mask %d\n", (jiffies-start_time)*10, status, Ser0UDCCR);
 
-	PRINTKD("[%lu]Status %d Mask %d\n", (jiffies-start_time)*10, status, Ser0UDCCR);
-
+	UDC_flip(Ser0UDCSR, status); // clear all pending sources
+	
 	/* ReSeT Interrupt Request - UDC has been reset */
 	if (status & UDCSR_RSTIR)
 	{
 		Ser0UDCCR = 0xFC;
-		Ser0UDCCR = UDCCR_TIM;
-	
-		/* starting 20ms or so reset sequence now... */
-		ep0_reset();  // just set state to idle
-		ep1_reset();  // flush dma, clear false stall
-		ep2_reset();  // flush dma, clear false stall
-
-		UDC_flip(Ser0UDCSR, status); // clear all pending sources
-		printk("[%lu]Reset: Mask %d\n", (jiffies-start_time)*10, Ser0UDCCR);
+		
+		if (second_reset) {
+			UDC_write(Ser0UDCCR, UDCCR_TIM);
+			//UDC_write(Ser0UDCCR, UDCCR_TIM | UDCCR_REM); // Errata 29
+		}
+		else {
+			Ser0UDCCR = UDCCR_TIM;
+			//Ser0UDCCR = UDCCR_TIM | UDCCR_REM; // Errata 29
+		}
+		
+		if (Ser0UDCCR & UDCCR_TIM || second_reset==1) {
+			/* starting 20ms or so reset sequence now... */
+			ep0_reset();  // just set state to idle
+			ep1_reset();  // flush dma, clear false stall
+			ep2_reset();  // flush dma, clear false stall
+		}
+		second_reset = 1;
+		//UDC_flip(Ser0UDCSR, status); // clear all pending sources
+		PRINTKI("[%lu]Reset: Mask %d\n", (jiffies-start_time)*10, Ser0UDCCR);		
 		return;
 	}
 	
-	// /* RESume Interrupt Request */
+	second_reset = 0;
+	
+	// /* RESume Interrupt Request ojo eliminar?*/
 	if ( status & UDCSR_RESIR )
 	{
 		core_kicker();
 		Ser0UDCCR = 0xFC;
-		Ser0UDCCR = UDCCR_TIM;
-		UDC_flip(Ser0UDCSR, status); // clear all pending sources
-		printk("[%lu]Resume: Mask %d\n", (jiffies-start_time)*10, Ser0UDCCR);
+		Ser0UDCCR = UDCCR_TIM | UDCCR_RESIM;
+		
+		//UDC_flip(Ser0UDCSR, status); // clear all pending sources
+		PRINTKD("[%lu]Resume: Mask %d\n", (jiffies-start_time)*10, Ser0UDCCR);
+		
 		return;
 	}
 
@@ -87,96 +103,34 @@ static void udc_int_hndlr(int irq, void *dev_id, struct pt_regs *regs)
 	if ( status & UDCSR_SUSIR )
 	{
 		Ser0UDCCR = 0xFC;
-		Ser0UDCCR = UDCCR_TIM;
-		UDC_flip(Ser0UDCSR, status); // clear all pending sources
-		printk("[%lu]Suspended: Mask %d\n", (jiffies-start_time)*10, Ser0UDCCR);
+		// Does not seems to help either to be necessary
+		if (tr==2) {
+			core_kicker();
+		}
+		
+		UDC_write(Ser0UDCCR, UDCCR_TIM | UDCCR_SUSIM); 
+		//UDC_write(Ser0UDCCR, UDCCR_TIM | UDCCR_SUSIM | UDCCR_REM); // Errata 29
+		//UDC_flip(Ser0UDCSR, status); // clear all pending sources
+		PRINTKI("[%lu]Suspended: Mask %d\n", (jiffies-start_time)*10, Ser0UDCCR);
 		return;
-	}
+	}	
+	
+	//UDC_flip(Ser0UDCSR, status); // clear all pending sources
+		
+	if (status & UDCSR_RIR)
+		ep1_int_hndlr(status);
 
-	UDC_flip(Ser0UDCSR, status); // clear all pending sources
+	if (status & UDCSR_TIR)
+		ep2_int_hndlr();
+	
+	if (status & UDCSR_EIR)
+		ep0_int_hndlr();
 	
 	// Test reset
 	if (tr) {
 		debug = 0;
-		return;		
-	}
-
-	if (status & UDCSR_RIR)
-		ep1_int_hndlr(status);
-
-	if (status & UDCSR_TIR)	
-		ep2_int_hndlr(status);
-	
-	if (status & UDCSR_EIR)
-		ep0_int_hndlr();
-		
-	// Set address woodoo
-	if (Ser0UDCAR != portAddress[currentPort]) {
-		Ser0UDCAR = portAddress[currentPort];
-		PRINTKD("[%lu]Apply address %d - %d\n", (jiffies-start_time)*10, portAddress[currentPort], Ser0UDCAR);			
-	}		
-}
-
-static inline void enable_resume_mask_suspend( void )
-{
-	int i = 0;
-
-	while( 1 ) {
-		Ser0UDCCR |= UDCCR_SUSIM; // mask future suspend events
-		udelay( i );
-		if ((Ser0UDCCR & UDCCR_SUSIM) || (Ser0UDCSR & UDCSR_RSTIR) )
-			break;
-		if ((Ser0UDCCR & UDCCR_SUSIM) || (Ser0UDCSR & UDCSR_RSTIR) )
-			break;			
-		if ( ++i == 50 ) {
-			printk("UDC: enable_resume: could not set SUSIM 0x%08x\n", Ser0UDCCR);
-			break;
-		}
-	}
-
-	 i = 0;
-	while( 1 ) {
-		Ser0UDCCR &= ~UDCCR_RESIM;
-		udelay( i );
-		if ((Ser0UDCCR & UDCCR_RESIM ) == 0 || (Ser0UDCSR & UDCSR_RSTIR))
-			break;
-		if ((Ser0UDCCR & UDCCR_RESIM ) == 0 || (Ser0UDCSR & UDCSR_RSTIR))
-			break;			
-		if (++i == 50 ) {
-			printk("UDC: enable_resume: could not clear RESIM 0x%08x\n", Ser0UDCCR);
-			break;
-		}
-	}
-}
-
-static inline void enable_suspend_mask_resume(void)
-{
-	 int i = 0;
-	while( 1 ) {
-		Ser0UDCCR |= UDCCR_RESIM; // mask future resume events
-		udelay( i );
-		if (Ser0UDCCR & UDCCR_RESIM || (Ser0UDCSR & UDCSR_RSTIR) )
-			break;
-		if (Ser0UDCCR & UDCCR_RESIM || (Ser0UDCSR & UDCSR_RSTIR) )
-			break;			
-		if (++i == 50 ) {
-			printk("UDC: enable_resume: could not clear RESIM 0x%08x\n", Ser0UDCCR);
-			break;
-		}
-	}
-	 i = 0;
-	while( 1 ) {
-		Ser0UDCCR &= ~UDCCR_SUSIM;
-		udelay( i );
-		if ((Ser0UDCCR & UDCCR_SUSIM ) == 0	|| (Ser0UDCSR & UDCSR_RSTIR))
-			break;
-		if ((Ser0UDCCR & UDCCR_SUSIM ) == 0	|| (Ser0UDCSR & UDCSR_RSTIR))
-			break;
-		if ( ++i == 50 ) {
-			printk("UDC: enable_resume: could not set SUSIM 0x%08x\n", Ser0UDCCR);
-			break;
-		}
-	}
+		info = 0;
+	}	
 }
 
 // HACK DEBUG  3Mar01ww
@@ -202,28 +156,19 @@ static void core_kicker( void )
 
 /* Start running. Must have called usb_open (above) first */
 int sa1100_usb_start( void ) {
-	desc_t pd;
 	
 	usbd_info.state = USB_STATE_SUSPENDED;
+
 	/* Enable UDC and mask everything */
 	UDC_write(Ser0UDCCR , 0xFC);
-	// printk("[%lu]reg %d status %d\n", (jiffies-start_time)*10, Ser0UDCCR, Ser0UDCSR);
-	// /* start UDC internal machinery running */
-	// UDC_clear(Ser0UDCCR, UDCCR_UDD);
-	// printk("[%lu]reg %d status %d\n", (jiffies-start_time)*10, Ser0UDCCR, Ser0UDCSR);
-	// udelay(100);
-	// printk("[%lu]reg %d status %d\n", (jiffies-start_time)*10, Ser0UDCCR, Ser0UDCSR);
+
 	/* clear stall - receiver seems to start stalled? 19Jan01ww */
 	/* also clear other stuff just to be thurough 22Feb01ww */
 	UDC_clear(Ser0UDCCS1, UDCCS1_FST | UDCCS1_RPE | UDCCS1_RPC );
 	UDC_clear(Ser0UDCCS2, UDCCS2_FST | UDCCS2_TPE | UDCCS2_TPC );
 
-	/* mask everything */
-	// UDC_write(Ser0UDCCR , 0xFC);
-
-	usb_get_hub_descriptor(&pd);
-	rx_pktsize = __le16_to_cpu( pd.b.ep1.wMaxPacketSize );	
-	tx_pktsize = __le16_to_cpu( pd.b.ep2.wMaxPacketSize );
+	rx_pktsize = 8;	// OJO
+	tx_pktsize = 1; // OJO
 	
 	/* flush DMA and fire through some -EAGAINs */
 	ep1_init( usbd_info.dmach_rx );
@@ -242,10 +187,6 @@ int sa1100_usb_start( void ) {
 	/* clear all top-level sources */
 	Ser0UDCSR = UDCSR_RSTIR | UDCSR_RESIR | UDCSR_EIR | UDCSR_RIR | UDCSR_TIR | UDCSR_SUSIR ;
 	
-return 0;			
-			UDC_write( Ser0UDCCR, 0);
-			Ser0UDCSR = UDCSR_RSTIR | UDCSR_RESIR | UDCSR_EIR | UDCSR_RIR | UDCSR_TIR | UDCSR_SUSIR ;
-	
 	return 0;
 }
 
@@ -256,7 +197,6 @@ int sa1100_usb_stop( void )
 	Ser0UDCCR = 0xFC;
 	ep1_reset();
 	ep2_reset();
-	udc_disable();
 
 	return 0;
 }
@@ -267,35 +207,6 @@ int sa1100_usb_stop( void )
  * the descriptors for your device.
  *
  */
-
-/* get pointer to descriptor for hub */
-void usb_get_hub_descriptor(desc_t * desc) {
-	if (currentPort)
-	{	
-		printk( "[%lu]%sHub descriptor requested for port %d\n", (jiffies-start_time)*10, pszctl, currentPort );
-	}
-	else
-	{
-		desc->dev = hub_device_desc;
-		desc->b.cfg = hub_config_desc; 
-		desc->b.intf = hub_interface_desc;
-		desc->b.ep1 = hub_endpoint_1;
-		desc->b.ep2 = hub_endpoint_2;
-	}
-
-	return;
-}
-
-//////////////////////////////////////////////////////////////////////////////
-// Private Helpers
-//////////////////////////////////////////////////////////////////////////////
-
-/* disable the UDC at the source */
-static void udc_disable(void)
-{
-	UDC_set( Ser0UDCCR, UDCCR_UDD);
-}
-
 
 //////////////////////////////////////////////////////////////////////////////
 // Module Initialization and Shutdown
@@ -309,16 +220,17 @@ int usbctl_init( void )
 {
 	int retval = 0;
 	
-	udc_disable();
+	// Disable UDC
+	UDC_set( Ser0UDCCR, UDCCR_UDD);
 
 	memset( &usbd_info, 0, sizeof( usbd_info ) );
 
-	if (!desc_buf) {
-		desc_buf = kmalloc(USB_BUFSIZ, GFP_ATOMIC);
-	}
-	
 	if (!port_changed_buf) {
 		port_changed_buf = kmalloc(1, GFP_ATOMIC);
+	}
+
+	if (!desc_buf) {
+		desc_buf = kmalloc(USB_BUFSIZ, GFP_ATOMIC);
 	}
 
 	/* setup rx dma */
@@ -361,9 +273,11 @@ err_rx_dma:
  */
 void usbctl_exit( void )
 {
-	udc_disable();
+	// Disable UDC
+	UDC_set( Ser0UDCCR, UDCCR_UDD);
     sa1100_free_dma(usbd_info.dmach_rx);
     sa1100_free_dma(usbd_info.dmach_tx);
+	free_irq(IRQ_Ser0UDC, NULL);
 	
 	if (desc_buf) {
 		kfree(desc_buf);
@@ -372,6 +286,4 @@ void usbctl_exit( void )
 	if (port_changed_buf) {
 		kfree(port_changed_buf);
 	}	
-	
-	free_irq(IRQ_Ser0UDC, NULL);
 }

@@ -82,14 +82,12 @@ int ep1_init(dma_regs_t *chn)
 
 void ep1_reset(void)
 {
-	desc_t pd;
 	if (currentPort) {
 		rx_pktsize = 8; // OJO
 	}
 	else
 	{	
-		usb_get_hub_descriptor(&pd);
-		rx_pktsize = __le16_to_cpu( pd.b.ep1.wMaxPacketSize );
+		rx_pktsize = 1; // OJO
 	}
 
 	sa1100_clear_dma(dmachn_rx);
