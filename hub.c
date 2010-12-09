@@ -48,6 +48,7 @@ static void * port_changed_buf;
 static int debug = 0;
 static int info = 1;
 static int addr_delay = 300;
+static int port_delay = 200;
 static int eventa = 0;
 static int eventd = 0;
 static int tr = 0;
@@ -100,34 +101,35 @@ static const usb_interface_descriptor hub_interface_desc = {
   .iInterface =		0
 };
 
-/* Hub endpoint Descriptor 1 (in)*/
-/*static const usb_endpoint_descriptor hub_endpoint_desc = {
-  .bLength =		USB_DT_ENDPOINT_SIZE,
-  .bDescriptorType =	USB_DT_ENDPOINT,
-  .bEndpointAddress =	0x81,
-  .bmAttributes =	0x03,
-  .wMaxPacketSize =	cpu_to_le16(0x08), // 0x0100;
-  .bInterval =		0x0c // 12 	// frames -> 32 ms
-};*/
-
 /* Hub endpoint Descriptor 1 ( ep2in)*/
 static const usb_endpoint_descriptor hub_endpoint_1 = {
   .bLength =		USB_DT_ENDPOINT_SIZE,
   .bDescriptorType =	USB_DT_ENDPOINT,
-  .bEndpointAddress =	USB_EP_ADDRESS( 2, USB_IN ), // USB_EP_ADDRESS( 1, USB_OUT )
+  .bEndpointAddress =	USB_EP_ADDRESS( 2, USB_IN ),
   .bmAttributes =	USB_EP_INT, 
   .wMaxPacketSize =	cpu_to_le16(1), // cpu_to_le16(8) ojo
   .bInterval =		12	// frames -> 32 ms
-  //.bInterval =		24	// jbc
 };
 
+/* Hub endpoint Descriptor 2 ( ep1out)*/
 static const usb_endpoint_descriptor hub_endpoint_2 = {
   .bLength =		USB_DT_ENDPOINT_SIZE,
   .bDescriptorType =	USB_DT_ENDPOINT,
-  .bEndpointAddress =	USB_EP_ADDRESS( 1, USB_OUT),  // USB_EP_ADDRESS( 2, USB_IN )
+  .bEndpointAddress =	USB_EP_ADDRESS( 1, USB_OUT),
   .bmAttributes =	USB_EP_INT, 
   .wMaxPacketSize =	cpu_to_le16(8),
   .bInterval =		12	// frames -> 32 ms
+};
+
+static const u8 hub_config_descriptor[] = {
+	// Config
+	0x09, 0x02, 0x19, 0x00, 0x01, 0x01, 0x00, 0xe0,
+	0x32,
+	// Interface
+	0x09, 0x04, 0x00, 0x00, 0x01, 0x09, 0x00, 0x00,
+	0x00,
+	// Endpoint (interrupt in)
+	0x07, 0x05, 0x82, 0x03, 0x01, 0x00, 0x0c,
 };
 
 static const u8 hub_header_desc[] = {
@@ -192,6 +194,9 @@ static void hub_port_changed ()
 		PRINTKI( "[%lu]Hub:Transmitting interrupt byte 0x%X\n", (jiffies-start_time)*10, data);
 		hub_interrupt_queued = 1;
 		memcpy (port_changed_buf, &data, 1);
+		// Half delay before send
+		if (port_delay)
+			udelay(port_delay);		
 		err = sa1100_usb_send(port_changed_buf, 1, hub_interrupt_complete);
 		if (err) {
 			printk( "retcode %d\n", err);
@@ -199,7 +204,9 @@ static void hub_port_changed ()
 		// Unmask EP2 interrupts
 		Ser0UDCCR = 0;		
 		// Ser0UDCCR = UDCCR_REM; // Errata 29
-		udelay(300); // OJO
+		// Half delay after send
+		if (port_delay)
+			udelay(port_delay);
 	} else {
 		if (hub_interrupt_queued)	{
 			printk( "hub_interrupt_transmit: pendiente usb_ep_dequeue\n");

@@ -23,20 +23,20 @@ enum { USB_STATE_NOTATTACHED=0, USB_STATE_ATTACHED=1,USB_STATE_POWERED=2,
 	   USB_STATE_DEFAULT=3, USB_STATE_ADDRESS=4, USB_STATE_CONFIGURED=5,
 	   USB_STATE_SUSPENDED=6};
 
-struct usb_stats_t {
-	 unsigned long ep0_fifo_write_failures;
-	 unsigned long ep0_bytes_written;
-	 unsigned long ep0_fifo_read_failures;
-	 unsigned long ep0_bytes_read;
-};
+// struct usb_stats_t {
+	 // unsigned long ep0_fifo_write_failures;
+	 // unsigned long ep0_bytes_written;
+	 // unsigned long ep0_fifo_read_failures;
+	 // unsigned long ep0_bytes_read;
+// };
 
 struct usb_info_t
 {
-	 char * client_name;
+	 // char * client_name;
 	 dma_regs_t *dmach_tx, *dmach_rx;
 	 int state;
 	 unsigned char address;
-	 struct usb_stats_t stats;
+	 // struct usb_stats_t stats;
 };
 
 /* in usb_ctl.c */
@@ -96,6 +96,8 @@ static void write_fifo( void );
 static int read_fifo( usb_dev_request_t * p );
 static void get_hub_descriptor( usb_dev_request_t * pReq );
 static void get_device_descriptor( usb_dev_request_t * pReq );
+static int jig_set_config(void);
+static void jig_interrupt_complete(int flag, int size);
 
 enum { true = 1, false = 0 };
 typedef int bool;
@@ -110,7 +112,7 @@ static bool clear_opr( void );
 /* receiver */
 int  ep1_recv(void);
 int  ep1_init(dma_regs_t *chn);
-void ep1_int_hndlr(int status);
+void ep1_int_hndlr(void);
 void ep1_reset(void);
 void ep1_stall(void);
 
@@ -179,11 +181,10 @@ int sa1100_usb_stop( void ) ;
 
 /* in usb_send.c */
 int sa1100_usb_send(char *buf, int len, usb_callback_t callback);
-void sa1100_usb_send_reset(void);
 
 /* in usb_recev.c */
 int sa1100_usb_recv(char *buf, int len, usb_callback_t callback);
-void sa1100_usb_recv_reset(void);
+
 
 //////////////////////////////////////////////////////////////////////////////
 // Descriptor Management

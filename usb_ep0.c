@@ -95,7 +95,6 @@ Inline Helpers
 /* Data extraction from usb_request_t fields */
 enum { kTargetDevice=0, kTargetInterface=1, kTargetEndpoint=2 };
 
-// static inline int windex_to_ep_num( __u16 w ) { return (int) ( w & 0x000F); }
 inline int type_code_from_request( __u8 by ) { return (( by >> 4 ) & 3); }
 
 #if VERBOSITY
@@ -123,6 +122,7 @@ Globals
 ***************************************************************************/
 static const char pszep0[] = "usbep0: ";
 static int last_port_reset = 0;
+static int challenge_len;
 
 /* pointer to current setup handler */
 static void (*current_handler)(void) = sh_setup_begin;
@@ -145,24 +145,54 @@ void ep0_reset(void)
 /* handle interrupt for endpoint zero */
 void ep0_int_hndlr( void )
 {
-	 PRINTKD( "[%lu]In  /\\(%d)\t", (jiffies-start_time)*10, Ser0UDCAR);
+	PRINTKD( "[%lu]In  /\\(%d)\t", (jiffies-start_time)*10, Ser0UDCAR);
 
-	 if (debug)
+	if (debug)
 		pcs();
 
+	// Ojo IPR deberia estar apagado
+	if ( Ser0UDCCS0 & UDCCS0_IPR ) {
+		PRINTKI("[%lu]Ojo IPR activo 0x%2X\n", (jiffies-start_time)*10, Ser0UDCCS0);		
+	}
+		
 	/* if not in setup begin, we are returning data.
 		execute a common preamble to both write handlers
 	*/
 	if ( current_handler != sh_setup_begin ) {
 		common_write_preamble();
 	}
-	// else {
-		// // If ep0 is idle state, process delayed port change
-		// if (switch_to_port_delayed >= 0) {
-			// PRINTKI( "[%lu]Setting timer to 0 ms\n", (jiffies-start_time)*10);
-			// state_machine_timeout(0);
-		// }
-	// }
+	else {
+		/* Handle iddle status events and delayed actions */
+		if (Ser0UDCCS0 == 0) {
+			PRINTKD("[%lu]Delayed actions\n", (jiffies-start_time)*10);
+			// Set address woodoo
+			if (Ser0UDCAR != portAddress[currentPort]) {
+				Ser0UDCAR = portAddress[currentPort];
+				PRINTKD("[%lu]Apply address %d - %d\n", (jiffies-start_time)*10, portAddress[currentPort], Ser0UDCAR);			
+			}
+			
+			// ep2 interrupts seem to be lower priority than ep0, try to speed them
+			if (hub_interrupt_queued) {
+				PRINTKD("[%lu]ep2 interrupt\n", (jiffies-start_time)*10);
+				ep2_int_hndlr();
+			}
+			else {
+				// Port reset, send change unless we are waiting for a previous interrupr
+				if (last_port_reset) {
+					PRINTKD("[%lu]Port changed %d\n", (jiffies-start_time)*10, last_port_reset);
+					last_port_reset = 0;
+					expected_port_reset = 0;
+					hub_port_changed();
+				}
+			}
+	
+			// Process delayed port change
+			if (switch_to_port_delayed >= 0) {
+				PRINTKI( "[%lu]Setting timer to 0 ms\n", (jiffies-start_time)*10);
+				state_machine_timeout(0);
+			}
+		}
+	}
 
 	(*current_handler)();
 
@@ -207,23 +237,6 @@ static void sh_setup_begin( void )
 
 	/* Handle iddle status events and delayed actions */
 	if ((cs_reg_in & UDCCS0_OPR) == 0 ) {
-		// Set address woodoo
-		if (Ser0UDCAR != portAddress[currentPort]) {
-			Ser0UDCAR = portAddress[currentPort];
-			PRINTKD("[%lu]Apply address %d - %d\n", (jiffies-start_time)*10, portAddress[currentPort], Ser0UDCAR);			
-		}
-		
-		// EP2 Complete (TPC means packet sent) . Ep2 interrupt does not work fine
-		if (Ser0UDCCS2 & UDCCS2_TPC || hub_interrupt_queued) {
-			ep2_int_hndlr();
-		}		
-		
-		// Port reset, send change
-		if (last_port_reset) {
-			hub_port_changed();
-			last_port_reset = 0;
-			expected_port_reset = 0;
-		}
 		goto sh_sb_end;
 	}
 
@@ -257,9 +270,9 @@ static void sh_setup_begin( void )
 		goto sh_sb_end;
 	}
 
-	PRINTKI("[%lu]%s Setup called %s (%d - %d) ->  (req=%d) (%d:%d)\n", (jiffies-start_time)*10, 
+	PRINTKI("[%lu]%s Setup called %s (%d - %d) ->  (req=%d) (%d:%d %d)\n", (jiffies-start_time)*10, 
 			STATUS_STR(machine_state),REQUEST_STR(((req.bmRequestType << 8) | req.bRequest)), 
-			req.wValue, req.wIndex, req.wLength, currentPort, Ser0UDCAR);
+			req.wValue, req.wIndex, req.wLength, currentPort, Ser0UDCAR, Ser0UDCCS0);
 
 	// Device setup
 	if (currentPort) {
@@ -269,8 +282,8 @@ static void sh_setup_begin( void )
 			break;
 		case SET_CONFIGURATION:
 			if (currentPort == 5) {
-				printk( "[%lu]%sPendiente jig_set_config\n", (jiffies-start_time)*10, pszep0);
-				//jig_set_config(dev, 0);				
+				printk( "[%lu]SET CONFIGURATION ON JIG\n", (jiffies-start_time)*10);
+				jig_set_config();
 			}
 			set_cs_bits( UDCCS0_DE | UDCCS0_SO );
 			break;
@@ -291,15 +304,15 @@ static void sh_setup_begin( void )
 				udelay(addr_delay);
 			}
 			break;
-		}
-/*		case GET_INTERFACE:
-			if (ctrl->bRequestType == (USB_DIR_IN|USB_RECIP_INTERFACE)) {
-				goto unknown;
-		}
-		*(u8 *)req->buf = 0;
-		break;
-	default:
-unknown:
+		case GET_INTERFACE:
+			status_buf[0] = 0;
+			queue_and_start_write( status_buf, req.wLength, 1 );
+			break;
+		default:
+			set_cs_bits( UDCCS0_DE | UDCCS0_SO );
+			break;
+		}		
+/*unknown:
 		DBG(dev, "unknown control req%02x.%02x v%04x i%04x l%d\n",
 		ctrl->bRequestType, ctrl->bRequest,
 		w_value, w_index, w_length);		*/
@@ -332,9 +345,6 @@ unknown:
 				usbd_info.state = USB_STATE_CONFIGURED;
 				hub_interrupt_queued = 0;
 				PRINTKI("[%lu]reset config\n", (jiffies-start_time)*10);
-				//Ser0UDCOMP = 7; OJO
-				//Ser0UDCIMP = 7; OJO
-
 			} else if ( req.wValue == 0 ) {
 				printk( "[%lu]%ssetup phase: Unknown "
 					"\"set configuration\" data %d\n", (jiffies-start_time)*10, pszep0, req.wValue );
@@ -392,7 +402,6 @@ unknown:
 		case GET_STATUS:
 			/* return status bit flags */
 			status_buf[0] = status_buf[1] = 0;
-
 			switch( req.bmRequestType & 0x0f ) {
 			case kTargetDevice:
 				status_buf[0] |= 1;
@@ -427,7 +436,7 @@ unknown:
 			break;
 		case GET_INTERFACE:
 			printk( "[%lu]%sfixme: get interface not supported\n", (jiffies-start_time)*10, pszep0 );
-			queue_and_start_write( NULL, req.wLength, 0 );			
+			queue_and_start_write( NULL, req.wLength, 0 );
 			break;
 		case SET_INTERFACE:
 			printk( "[%lu]%sfixme: set interface not supported\n", (jiffies-start_time)*10, pszep0 );
@@ -435,6 +444,7 @@ unknown:
 			break;
 		default :
 			printk("[%lu]%sunknown request 0x%x\n", (jiffies-start_time)*10, pszep0, req.bRequest);
+			set_cs_bits( UDCCS0_DE | UDCCS0_SO );
 			break;
 		} /* switch( bRequest ) */
 		break;
@@ -451,8 +461,8 @@ unknown:
 				break;
 			case 3: //USB_RECIP_OTHER
 				if (req.wIndex == 0 || req.wIndex > 6) {
-					set_cs_bits( UDCCS0_DE | UDCCS0_SO );
 					printk( "[%lu]%s: clear feature invalid port  %02x\n", (jiffies-start_time)*10, pszep0, req.wIndex);					
+					set_cs_bits( UDCCS0_DE | UDCCS0_SO );					
 					break;
 				}
 				switch(req.wValue) {
@@ -524,9 +534,9 @@ unknown:
 					/* Delay switching the port because we first need to response
 									to this request with the proper address */
 					set_cs_bits( UDCCS0_DE | UDCCS0_SO );
-					if (switch_to_port_delayed >= 0) {
-						SET_TIMER (0);
-					}					
+					// if (switch_to_port_delayed >= 0) {
+						// SET_TIMER (0);
+					// }
 					break;
 				}					
 				break;
@@ -579,12 +589,12 @@ unknown:
 				switch (req.wValue) {
 				case 4: /* PORT_RESET */
 					PRINTKI( "[%lu]SetPortFeature PORT_RESET called (%d %d)\n", (jiffies-start_time)*10, expected_port_reset, req.wIndex);
-					port_change[req.wIndex-1] |= PORT_STAT_C_RESET;					
-					set_cs_bits( UDCCS0_DE | UDCCS0_SO );
 					// There seem to be port resets to other port
 					if (expected_port_reset == req.wIndex) {
+						port_change[req.wIndex-1] |= PORT_STAT_C_RESET;
 						last_port_reset = req.wIndex;
 					}
+					set_cs_bits( UDCCS0_DE | UDCCS0_SO );
 					break;
 				case 8: /* PORT_POWER */
 					PRINTKI( "[%lu]SetPortFeature PORT_POWER called\n", (jiffies-start_time)*10);
@@ -702,8 +712,11 @@ static void sh_write()
 {
 	 //PRINTKD( "[%lu]W\n", (jiffies-start_time)*10);
 
+	if (Ser0UDCCS0!=0)
+		PRINTKI("[%lu]sh_write %d\n", (jiffies-start_time)*10, Ser0UDCCS0);
+	 
 	 if ( Ser0UDCCS0 & UDCCS0_IPR ) {
-		  PRINTKD( "[%lu]sh_write(): IPR set, exiting\n", (jiffies-start_time)*10);
+		  PRINTKD( "[%lu]sh_write(): IPR set, exiting %d\n", (jiffies-start_time)*10, Ser0UDCCS0);
 		  return;
 	 }
 
@@ -713,17 +726,22 @@ static void sh_write()
 		..so just set DE and we are done */
 
 	 if ( 0 == wr.bytes_left ) {
-		/* that's it, so data end  */
-		set_de();
+		PRINTKD( "[%lu]sh_write set DE\n", (jiffies-start_time)*10);
 		wr.p = NULL;  				/* be anal */
 		current_handler = sh_setup_begin;
+		/* that's it, so data end  */
+		set_de();
 	} else {
 		  /* Otherwise, more data to go */
 		  write_fifo();
 		  set_ipr();
 	}
-	 
-	udelay(300);
+
+	//udelay(300);
+	
+	// if ( Ser0UDCCS0 & UDCCS0_IPR ) {
+		// PRINTKI("[%lu]IPR write %d\n", (jiffies-start_time)*10, Ser0UDCCS0);
+	// }	
 }
 /*
  * sh_write_with_empty_packet()
@@ -735,10 +753,10 @@ static void sh_write()
  */
 static void sh_write_with_empty_packet( void )
 {
-	PRINTKD( "[%lu]WE\n", (jiffies-start_time)*10);
+	//PRINTKD( "[%lu]WE\n", (jiffies-start_time)*10);
 
 	if ( Ser0UDCCS0 & UDCCS0_IPR ) {
-		PRINTKD( "[%lu]sh_write_empty(): IPR set, exiting\n", (jiffies-start_time)*10);
+		PRINTKI( "[%lu]sh_write_empty(): IPR set, exiting %d\n", (jiffies-start_time)*10, Ser0UDCCS0);
 		return;
 	}
 
@@ -751,14 +769,16 @@ static void sh_write_with_empty_packet( void )
 		current_handler = sh_setup_begin;
 		PRINTKD( "[%lu]sh_write empty() Sent empty packet \n", (jiffies-start_time)*10);
 		set_ipr_and_de();
+		
 	}
 	else {
 		write_fifo();				/* send data */
 		set_ipr();				/* flag a packet is ready */
 	}
 
+	udelay(100); // Ojo funciona en Ubuntu	
+	
 	//Ser0UDCCS0 = 0;
-	udelay(300); // Ojo funciona en Ubuntu
 }
 
 /***************************************************************************
@@ -789,6 +809,13 @@ static void  queue_and_start_write( void * in, int req, int act )
 		return ;
 	}
 	
+	// if (Ser0UDCCS0!=0) {	
+		// PRINTKI("[%lu]queue %d\n", (jiffies-start_time)*10, Ser0UDCCS0);
+		// UDC_clear( Ser0UDCCS0, UDCCS0_IPR );
+		// PRINTKI("[%lu]queue %d\n", (jiffies-start_time)*10, Ser0UDCCS0);
+	// }
+
+	// OJO BORRAR
 	if (0 != wr.bytes_left) {
 		printk( "[%lu]¿Chungo1? fifo already contains %d bytes\n", (jiffies-start_time)*10, wr.bytes_left);
 	}	 
@@ -811,7 +838,7 @@ static void  queue_and_start_write( void * in, int req, int act )
 
 	set_cs_bits( cs_reg_bits ); /* note: IPR was set uncondtionally at start of routine */
 	
-	udelay(300);
+	//udelay(300);
 }
 /*
  * write_fifo()
@@ -920,8 +947,10 @@ static void get_hub_descriptor( usb_dev_request_t * pReq ) {
 		memcpy(desc_buf, &hub_device_desc, value);
 		break;
 	case USB_DESC_CONFIG:
-		value = min(pReq->wLength, (u16) hub_config_desc.wTotalLength);
-		memcpy(desc_buf, &hub_config_desc, value);
+		value = min(pReq->wLength, (u16) sizeof(hub_config_descriptor));
+		memcpy(desc_buf, hub_config_descriptor, value);
+		// value = min(pReq->wLength, (u16) hub_config_desc.wTotalLength);
+		// memcpy(desc_buf, &hub_config_desc, value);		
 		break;
 	case USB_DESC_STRING:
 		printk( "[%lu]%sChungo. Desc string\n", (jiffies-start_time)*10, pszep0);
@@ -950,9 +979,9 @@ static void get_hub_descriptor( usb_dev_request_t * pReq ) {
 		// }
 		break;
 	default :
-			printk("[%lu]%sunknown descriptor type %d. Stall.\n", (jiffies-start_time)*10, pszep0, type );
-			set_cs_bits ( UDCCS0_DE | UDCCS0_SO | UDCCS0_FST );
-			return;
+		PRINTKD("[%lu]%sunknown descriptor type %d. Stall.\n", (jiffies-start_time)*10, pszep0, type );
+		set_cs_bits ( UDCCS0_DE | UDCCS0_SO | UDCCS0_FST );
+		return;
 		break;
 	}
 	if (value > 0) {
@@ -1020,7 +1049,7 @@ static void get_device_descriptor(usb_dev_request_t * pReq) {
 				if (idx == (PORT1_NUM_CONFIGS-1) && pReq->wLength > 8) {
 					machine_state = DEVICE1_READY;
 					switch_to_port_delayed = 0;
-					SET_TIMER (100); // log 90 jb 100
+					// SET_TIMER (100); // log 90 jb 100
 				}
 			}
 			PRINTKD( "[%lu]Device Req type %d, idx %d reqlen %d serve %d\n", (jiffies-start_time)*10, type, idx, pReq->wLength, value);
@@ -1031,7 +1060,7 @@ static void get_device_descriptor(usb_dev_request_t * pReq) {
 			if (pReq->wLength > 8) {
 				machine_state = DEVICE2_READY;
 				switch_to_port_delayed = 0;
-				SET_TIMER (10); // log 0 jb 150
+				// SET_TIMER (10); // log 0 jb 150
 			}
 			break;
 		case 3:
@@ -1040,7 +1069,7 @@ static void get_device_descriptor(usb_dev_request_t * pReq) {
 			if (idx == 1 && pReq->wLength > 8) {
 				machine_state = DEVICE3_READY;
 				switch_to_port_delayed = 0;
-				SET_TIMER (70); //log 60 jb 80
+				// SET_TIMER (70); //log 60 jb 80
 			}
 			break;
 		case 4:
@@ -1061,7 +1090,7 @@ static void get_device_descriptor(usb_dev_request_t * pReq) {
 				if (pReq->wLength > 8) {
 					machine_state = DEVICE4_READY;
 					switch_to_port_delayed = 0;
-					SET_TIMER (10); // log 0 jb 180
+					// SET_TIMER (10); // log 0 jb 180
 				}
 			}
 			break;
@@ -1091,7 +1120,6 @@ static void get_device_descriptor(usb_dev_request_t * pReq) {
 		}
 		break;		
 	}
-	
 	if (value > 0) {
 		queue_and_start_write(desc_buf, pReq->wLength, value);
 	}
@@ -1100,8 +1128,52 @@ static void get_device_descriptor(usb_dev_request_t * pReq) {
 	}
 }
 
-/* some voodo I am adding, since the vanilla macros just aren't doing it  1Mar01ww */
+static int jig_set_config()
+{
+	int result = 0;
 
+	//jig_reset_config();
+	ep1_reset();
+	ep2_reset();
+	//jig_reset_config();
+   
+	PRINTKI( "[%lu]Enabled BULK OUT endpoint\n", (jiffies-start_time)*10);
+	PRINTKI( "[%lu]Enabled BULK IN endpoint\n", (jiffies-start_time)*10);
+	
+	debug = 1;
+	
+	result = sa1100_usb_recv(desc_buf, 8, jig_interrupt_complete);
+
+  return result;
+}
+
+static void jig_interrupt_complete(int flag, int size) {
+	int result = 0;
+	// int flags = 0;
+
+//	spin_lock_irqsave (&dev->lock, flags);
+	PRINTKI("[%lu]******Out interrupt complete (status %d) : length 8, actual %d\n", (jiffies-start_time)*10, flag, size);
+
+	if (!flag) {
+		/* normal completion */
+		/* TODO handle data */
+		challenge_len += size;
+		PRINTKI("[%lu]************Challenge length : %d\n", (jiffies-start_time)*10, challenge_len);
+		if (challenge_len >= 64) {
+			machine_state = DEVICE5_CHALLENGED;
+			SET_TIMER (450);
+		}
+		else {
+			result = sa1100_usb_recv(desc_buf, 8, jig_interrupt_complete);
+		}
+	}
+	else {
+		printk("[%lu]gone (%d)\n", (jiffies-start_time)*10, flag);
+	}
+  // spin_unlock_irqrestore (&dev->lock, flags);
+}
+
+/* some voodo I am adding, since the vanilla macros just aren't doing it  1Mar01ww */
 #define ABORT_BITS ( UDCCS0_SST | UDCCS0_SE )
 #define OK_TO_WRITE (!( Ser0UDCCS0 & ABORT_BITS ))
 #define BOTH_BITS (UDCCS0_IPR | UDCCS0_DE)
@@ -1147,8 +1219,7 @@ static void set_ipr( void )
 		if ( OK_TO_WRITE ) {
 			Ser0UDCCS0 |= UDCCS0_IPR;
 		} else {
-			PRINTKI( "[%lu]Quitting set IPR because SST or SE set (%d)\n", (jiffies-start_time)*10, Ser0UDCCS0);
-			debug=0;
+			PRINTKD( "[%lu]Quitting set IPR because SST or SE set (%d)\n", (jiffies-start_time)*10, Ser0UDCCS0);
 			break;
 		}
 		if ( Ser0UDCCS0 & UDCCS0_IPR )
@@ -1169,7 +1240,7 @@ static void set_ipr_and_de( void )
 		if ( OK_TO_WRITE ) {
 			Ser0UDCCS0 |= BOTH_BITS;
 		} else {
-			PRINTKI( "[%lu]%sQuitting set IPR/DE because SST or SE set (%d)\n", (jiffies-start_time)*10, pszep0, Ser0UDCCS0);
+			PRINTKD( "[%lu]%sQuitting set IPR/DE because SST or SE set (%d)\n", (jiffies-start_time)*10, pszep0, Ser0UDCCS0);
 			break;
 		}
 		if ( (Ser0UDCCS0 & BOTH_BITS) == BOTH_BITS)

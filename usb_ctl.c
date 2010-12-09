@@ -118,7 +118,7 @@ static void udc_int_hndlr(int irq, void *dev_id, struct pt_regs *regs)
 	//UDC_flip(Ser0UDCSR, status); // clear all pending sources
 		
 	if (status & UDCSR_RIR)
-		ep1_int_hndlr(status);
+		ep1_int_hndlr();
 
 	if (status & UDCSR_TIR)
 		ep2_int_hndlr();

@@ -231,9 +231,3 @@ int sa1100_usb_send(char *buf, int len, usb_callback_t callback)
 	local_irq_restore(flags);
 	return 0;
 }
-
-void
-sa1100_usb_send_reset(void)
-{
-	ep2_reset();
-}

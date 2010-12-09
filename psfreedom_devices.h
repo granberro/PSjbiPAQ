@@ -118,23 +118,23 @@
 #endif /* USE_JIG */
 
 /* Hub endpoint Descriptor */
-// static struct usb_endpoint_descriptor jig_out_endpoint_desc = {
+// static const usb_endpoint_descriptor jig_out_endpoint_desc = {
   // .bLength =		USB_DT_ENDPOINT_SIZE,
   // .bDescriptorType =	USB_DT_ENDPOINT,
-  // .bEndpointAddress =	USB_EP_ADDRESS( 2, USB_OUT )
+  // .bEndpointAddress =	USB_EP_ADDRESS( 1, USB_OUT ),
   // .bmAttributes =	USB_EP_BULK,
-  // .wMaxPacketSize =	__constant_cpu_to_le16(8),
+  // .wMaxPacketSize =	cpu_to_le16(8),
   // .bInterval =		0x00
 // };
 
-/* Hub endpoint Descriptor */
-// static struct usb_endpoint_descriptor jig_in_endpoint_desc = {
+// /* Hub endpoint Descriptor */
+// static const usb_endpoint_descriptor jig_in_endpoint_desc = {
   // .bLength =		USB_DT_ENDPOINT_SIZE,
   // .bDescriptorType =	USB_DT_ENDPOINT,
-  // .bEndpointAddress =	USB_DIR_IN | 0x01,
-  // .bmAttributes =	USB_ENDPOINT_XFER_BULK,
-  // .wMaxPacketSize =	__constant_cpu_to_le16(8),
-  // .bInterval =		0x00,
+  // .bEndpointAddress =	USB_EP_ADDRESS( 2, USB_IN ),
+  // .bmAttributes =	USB_EP_BULK,
+  // .wMaxPacketSize =	cpu_to_le16(8),
+  // .bInterval =		0x00
 // };
 
 static const u8 jig_response[64] = {
@@ -152,6 +152,10 @@ static const u8 port1_device_desc[] = {
 static const u8 port1_short_config_desc[] = {
   0x09, 0x02, 0x00, 0x0f, 0x01, 0x00, 0x00, 0x80,
 };
+
+// static const u8 port1_short_config_desc[] = {
+  // 0x09, 0x02, 0x00, 0x0f, 0x01, 0x00, 0x00, 0x80, 0xfa
+// };
 
 static const u8 port1_config_desc[] = {
 	0x09, 0x02, 0x12, 0x00, 0x01, 0x00, 0x00, 0x80, 0xFA, 0x09, 0x04, 0x00,
@@ -866,7 +870,7 @@ static const u8 port5_config_desc[] = {
   // interface
   0x09, 0x04, 0x01, 0x00, 0x02, 0xff, 0x00, 0x00, 0x00,
   // endpoint
-  0x07, 0x05, 0x02, 0x02, 0x08, 0x00, 0x00,
+  0x07, 0x05, 0x82, 0x02, 0x08, 0x00, 0x00,
   // endpoint
-  0x07, 0x05, 0x81, 0x02, 0x08, 0x00, 0x00,
+  0x07, 0x05, 0x01, 0x02, 0x08, 0x00, 0x00,
 };

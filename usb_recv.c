@@ -21,7 +21,7 @@
 #include <asm/system.h>
 #include "usb_ctl.h"
 
-static char *ep1_buf;
+//static char *ep1_buf;
 static int ep1_len;
 static usb_callback_t ep1_callback;
 static char *ep1_curdmabuf;
@@ -34,16 +34,24 @@ static int naking;
 
 static void ep1_start(void)
 {
+	PRINTKD( "[%lu]ep1_start dma_len %d remain %d pkt %d\n", (jiffies-start_time)*10, ep1_curdmalen, ep1_remain,
+		rx_pktsize);
+	
 	sa1100_clear_dma(dmachn_rx);
+	
 	if (!ep1_curdmalen) {
+		// ep1_curdmalen is min (rx_pktsize , ep1_remain) 
 	  	ep1_curdmalen = rx_pktsize;
 		if (ep1_curdmalen > ep1_remain)
 			ep1_curdmalen = ep1_remain;
-		ep1_curdmapos = pci_map_single(NULL, ep1_curdmabuf, ep1_curdmalen,
-					       PCI_DMA_FROMDEVICE);
+
+		ep1_curdmapos = pci_map_single(NULL, ep1_curdmabuf, ep1_curdmalen, PCI_DMA_FROMDEVICE);
 	}
 
+	UDC_write( Ser0UDCOMP, ep1_curdmalen - 1);
+	
 	sa1100_start_dma(dmachn_rx, ep1_curdmapos, ep1_curdmalen);
+
 	if ( naking ) {
 		/* turn off NAK of OUT packets, if set */
 		UDC_flip( Ser0UDCCS1, UDCCS1_RPC );
@@ -55,12 +63,16 @@ static void ep1_done(int flag)
 {
 	int size = ep1_len - ep1_remain;
 
+	PRINTKD( "[%lu]ep1_done dma_len %d remain %d\n", (jiffies-start_time)*10, ep1_len, ep1_remain);	
+	
 	if (!ep1_len)
 		return;
+		
 	if (ep1_curdmalen)
-		pci_unmap_single(NULL, ep1_curdmapos, ep1_curdmalen,
-				 PCI_DMA_FROMDEVICE);
+		pci_unmap_single(NULL, ep1_curdmapos, ep1_curdmalen, PCI_DMA_FROMDEVICE);
+		
 	ep1_len = ep1_curdmalen = 0;
+	
 	if (ep1_callback) {
 		ep1_callback(flag, size);
 	}
@@ -74,6 +86,7 @@ void ep1_stall( void )
 
 int ep1_init(dma_regs_t *chn)
 {
+	UDC_write( Ser0UDCOMP, rx_pktsize-1 );
 	dmachn_rx = chn;
 	sa1100_clear_dma(dmachn_rx);
 	ep1_done(-EAGAIN);
@@ -95,19 +108,22 @@ void ep1_reset(void)
 	ep1_done(-EINTR);
 }
 
-void ep1_int_hndlr(int udcsr)
+void ep1_int_hndlr()
 {
 	dma_addr_t dma_addr;
 	unsigned int len;
 	int status = Ser0UDCCS1;
 
-	if ( naking ) printk( "%sEh? in ISR but naking = %d\n", "usbrx: ", naking );
+	PRINTKI( "[%lu]Ep1 int %d\n", (jiffies-start_time)*10, status);
+	
+	if ( naking )
+		printk( "%sEh? in ISR but naking = %d\n", "usbrx: ", naking );
 
+	// Reive packet complete
 	if (status & UDCCS1_RPC) {
-
 		if (!ep1_curdmalen) {
 			printk("usb_recv: RPC for non-existent buffer\n");
-			naking=1;
+			naking = 1;
 			return;
 		}
 
@@ -128,9 +144,10 @@ void ep1_int_hndlr(int udcsr)
 		}
 
 		dma_addr = sa1100_get_dma_pos(dmachn_rx);
-		pci_unmap_single(NULL, ep1_curdmapos, ep1_curdmalen,
-				 PCI_DMA_FROMDEVICE);
+		pci_unmap_single(NULL, ep1_curdmapos, ep1_curdmalen, PCI_DMA_FROMDEVICE);
+		
 		len = dma_addr - ep1_curdmapos;
+
 		if (len < ep1_curdmalen) {
 			char *buf = ep1_curdmabuf + len;
 			while (Ser0UDCCS1 & UDCCS1_RNE) {
@@ -161,7 +178,7 @@ int sa1100_usb_recv(char *buf, int len, usb_callback_t callback)
 		return -EBUSY;
 
 	local_irq_save(flags);
-	ep1_buf = buf;
+	//ep1_buf = buf;
 	ep1_len = len;
 	ep1_callback = callback;
 	ep1_remain = len;
@@ -171,14 +188,4 @@ int sa1100_usb_recv(char *buf, int len, usb_callback_t callback)
 	local_irq_restore(flags);
 
 	return 0;
-}
-
-void sa1100_usb_recv_reset(void)
-{
-	ep1_reset();
-}
-
-void sa1100_usb_recv_stall(void)
-{
-	ep1_stall();
 }
