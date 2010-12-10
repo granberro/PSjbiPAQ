@@ -100,7 +100,6 @@ enum {
 static void hub_port_changed(void);
 static void hub_connect_port (unsigned int port);
 static void hub_disconnect_port (unsigned int port);
-static void jig_response_send (void);
 static void hub_interrupt_complete(int flag, int size);
 static void state_machine_timeout(unsigned long data);
 

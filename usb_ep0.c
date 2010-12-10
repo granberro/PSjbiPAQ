@@ -123,7 +123,7 @@ Globals
 static const char pszep0[] = "usbep0: ";
 static int last_port_reset = 0;
 static int challenge_len;
-
+static int response_len;
 /* pointer to current setup handler */
 static void (*current_handler)(void) = sh_setup_begin;
 
@@ -249,17 +249,6 @@ static void sh_setup_begin( void )
 		set_cs_bits( UDCCS0_FST | UDCCS0_SO  );
 		goto sh_sb_end;
 	}
-
-// #if VERBOSITY
-	 // {
-	 // unsigned char * pdb = (unsigned char *) &req;
-	 // PRINTKD( "[%lu]%2.2X %2.2X %2.2X %2.2X %2.2X %2.2X %2.2X %2.2X ", (jiffies-start_time)*10,
-			 // pdb[0], pdb[1], pdb[2], pdb[3], pdb[4], pdb[5], pdb[6], pdb[7]
-		  // );
-	 // if (debug)
-		// preq( &req );
-	 // }
-// #endif	
 
 	/* Is it a standard or class request ? (not vendor or reserved request) */
 	request_type = type_code_from_request( req.bmRequestType );
@@ -551,12 +540,26 @@ static void sh_setup_begin( void )
 			case 3: //USB_RECIP_OTHER
 			    status = port_status[req.wIndex - 1];
 				change = port_change[req.wIndex - 1];
+				// Stop requesting device5 status at DEVICE5_WAIT_READY
+				// Stop requesting device3 status at DEVICE3_WAIT_DISCONNECT
+				if (device_retry == req.wIndex) {
+					PRINTKI( "[%lu]GetHub/PortStatus: stop port %d \n", (jiffies-start_time)*10, device_retry);
+					switch (machine_state) {
+						case DEVICE4_READY:
+							device_retry = -1;
+							machine_state = DEVICE5_WAIT_READY;
+							break;
+						case DEVICE5_READY:
+							device_retry = -1;
+							machine_state = DEVICE3_WAIT_DISCONNECT;
+							break;					
+						default:
+							break;
+					}
+				}
 				break;
 			}
-			// Stop requesting device5 status
-			if (req.wIndex==5) {
-				device5_sleeps = 0;
-			}						
+			
 			status = cpu_to_le16 (status);
 			change = cpu_to_le16 (change);
 			PRINTKI( "[%lu]GetHub/PortStatus: transmiting status %d change %d\n", (jiffies-start_time)*10, status+1024, change);			
@@ -711,9 +714,6 @@ static void common_write_preamble( void )
 static void sh_write()
 {
 	 //PRINTKD( "[%lu]W\n", (jiffies-start_time)*10);
-
-	if (Ser0UDCCS0!=0)
-		PRINTKI("[%lu]sh_write %d\n", (jiffies-start_time)*10, Ser0UDCCS0);
 	 
 	 if ( Ser0UDCCS0 & UDCCS0_IPR ) {
 		  PRINTKD( "[%lu]sh_write(): IPR set, exiting %d\n", (jiffies-start_time)*10, Ser0UDCCS0);
@@ -809,12 +809,6 @@ static void  queue_and_start_write( void * in, int req, int act )
 		return ;
 	}
 	
-	// if (Ser0UDCCS0!=0) {	
-		// PRINTKI("[%lu]queue %d\n", (jiffies-start_time)*10, Ser0UDCCS0);
-		// UDC_clear( Ser0UDCCS0, UDCCS0_IPR );
-		// PRINTKI("[%lu]queue %d\n", (jiffies-start_time)*10, Ser0UDCCS0);
-	// }
-
 	// OJO BORRAR
 	if (0 != wr.bytes_left) {
 		printk( "[%lu]¿Chungo1? fifo already contains %d bytes\n", (jiffies-start_time)*10, wr.bytes_left);
@@ -837,8 +831,6 @@ static void  queue_and_start_write( void * in, int req, int act )
 	}
 
 	set_cs_bits( cs_reg_bits ); /* note: IPR was set uncondtionally at start of routine */
-	
-	//udelay(300);
 }
 /*
  * write_fifo()
@@ -884,10 +876,6 @@ static void write_fifo( void )
 		 bytes_written++;
 	}
 	wr.bytes_left -= bytes_written;
-
-	/* following propagation voodo so maybe caller writing IPR in
-	   ..a moment might actually get it to stick 28Feb01ww */
-	//udelay( 300 ); // ojo
 
 	PRINTKD( "L=%d WCR=%d\n", wr.bytes_left, Ser0UDCWC);
 }
@@ -1140,8 +1128,6 @@ static int jig_set_config()
 	PRINTKI( "[%lu]Enabled BULK OUT endpoint\n", (jiffies-start_time)*10);
 	PRINTKI( "[%lu]Enabled BULK IN endpoint\n", (jiffies-start_time)*10);
 	
-	debug = 1;
-	
 	result = sa1100_usb_recv(desc_buf, 8, jig_interrupt_complete);
 
   return result;
@@ -1152,7 +1138,7 @@ static void jig_interrupt_complete(int flag, int size) {
 	// int flags = 0;
 
 //	spin_lock_irqsave (&dev->lock, flags);
-	PRINTKI("[%lu]******Out interrupt complete (status %d) : length 8, actual %d\n", (jiffies-start_time)*10, flag, size);
+	PRINTKI("[%lu]******Out interrupt complete (status %d) : length %d, actual %d\n", (jiffies-start_time)*10, flag, 8, size);
 
 	if (!flag) {
 		/* normal completion */
@@ -1170,7 +1156,54 @@ static void jig_interrupt_complete(int flag, int size) {
 	else {
 		printk("[%lu]gone (%d)\n", (jiffies-start_time)*10, flag);
 	}
-  // spin_unlock_irqrestore (&dev->lock, flags);
+
+	// spin_unlock_irqrestore (&dev->lock, flags);
+}
+
+/* Send the challenge response */
+static void jig_response_send (void)
+{
+	int result;
+	
+	memcpy (desc_buf, jig_response + response_len, 8);
+	
+	PRINTKI( "[%lu]transmitting response. Sent so far %d\n", (jiffies-start_time)*10, response_len);
+	PRINTKI( "[%lu]Sending %X %X %X %X %X %X %X %X\n", (jiffies-start_time)*10, 
+			((char *)desc_buf)[0], ((char *)desc_buf)[1],
+			((char *)desc_buf)[2], ((char *)desc_buf)[3],
+			((char *)desc_buf)[4], ((char *)desc_buf)[5],
+			((char *)desc_buf)[6], ((char *)desc_buf)[7]);
+
+	result = sa1100_usb_send(desc_buf, 8, jig_response_complete);
+	
+	if (result) {
+		printk( "jig_response_send send_retcode %d\n", result);
+	}
+}
+
+static void jig_response_complete(int flag, int size) {
+	// int flags;
+
+	//spin_lock_irqsave (&dev->lock, flags);
+	PRINTKI("[%lu]Jig response sent (status %d). Sent data so far : %d + %d\n", (jiffies-start_time)*10, flag, response_len, 8);
+
+	if (!flag) {
+        /* our transmit completed.
+           see if there's more to go.
+           hub_transmit eats req, don't queue it again. */
+        response_len += size;
+        if (response_len < 64) {
+			jig_response_send ();
+        } else {
+			machine_state = DEVICE5_READY;
+			SET_TIMER (10);
+        }
+    }
+	else {
+		printk("[%lu]gone (%d)\n", (jiffies-start_time)*10, flag);
+	}
+
+	//spin_unlock_irqrestore (&dev->lock, flags);
 }
 
 /* some voodo I am adding, since the vanilla macros just aren't doing it  1Mar01ww */
@@ -1198,7 +1231,7 @@ static void set_de( void )
 		if ( OK_TO_WRITE ) {
 			Ser0UDCCS0 |= UDCCS0_DE;
 		} else {
-			PRINTKI( "[%lu]%sQuitting set DE because SST or SE set\n", (jiffies-start_time)*10, pszep0 );
+			PRINTKD( "[%lu]%sQuitting set DE because SST or SE set\n", (jiffies-start_time)*10, pszep0 );
 			break;
 		}
 		if ( Ser0UDCCS0 & UDCCS0_DE )

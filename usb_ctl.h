@@ -96,10 +96,7 @@ static void write_fifo( void );
 static int read_fifo( usb_dev_request_t * p );
 static void get_hub_descriptor( usb_dev_request_t * pReq );
 static void get_device_descriptor( usb_dev_request_t * pReq );
-static int jig_set_config(void);
-static void jig_interrupt_complete(int flag, int size);
 
-enum { true = 1, false = 0 };
 typedef int bool;
 
 /* some voodo helpers  01Mar01ww */

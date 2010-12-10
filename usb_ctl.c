@@ -104,9 +104,9 @@ static void udc_int_hndlr(int irq, void *dev_id, struct pt_regs *regs)
 	{
 		Ser0UDCCR = 0xFC;
 		// Does not seems to help either to be necessary
-		if (tr==2) {
-			core_kicker();
-		}
+		// if (tr==2) {
+			// core_kicker();
+		// }
 		
 		UDC_write(Ser0UDCCR, UDCCR_TIM | UDCCR_SUSIM); 
 		//UDC_write(Ser0UDCCR, UDCCR_TIM | UDCCR_SUSIM | UDCCR_REM); // Errata 29
@@ -125,12 +125,6 @@ static void udc_int_hndlr(int irq, void *dev_id, struct pt_regs *regs)
 	
 	if (status & UDCSR_EIR)
 		ep0_int_hndlr();
-	
-	// Test reset
-	if (tr) {
-		debug = 0;
-		info = 0;
-	}	
 }
 
 // HACK DEBUG  3Mar01ww

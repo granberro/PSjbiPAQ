@@ -63,7 +63,7 @@ static void ep1_done(int flag)
 {
 	int size = ep1_len - ep1_remain;
 
-	PRINTKD( "[%lu]ep1_done dma_len %d remain %d\n", (jiffies-start_time)*10, ep1_len, ep1_remain);	
+	PRINTKD( "[%lu]ep1_done len %d remain %d\n", (jiffies-start_time)*10, ep1_len, ep1_remain);	
 	
 	if (!ep1_len)
 		return;
@@ -114,7 +114,7 @@ void ep1_int_hndlr()
 	unsigned int len;
 	int status = Ser0UDCCS1;
 
-	PRINTKI( "[%lu]Ep1 int %d\n", (jiffies-start_time)*10, status);
+	PRINTKD( "[%lu]Ep1 int %d\n", (jiffies-start_time)*10, status);
 	
 	if ( naking )
 		printk( "%sEh? in ISR but naking = %d\n", "usbrx: ", naking );

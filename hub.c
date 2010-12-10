@@ -51,8 +51,7 @@ static int addr_delay = 300;
 static int port_delay = 200;
 static int eventa = 0;
 static int eventd = 0;
-static int tr = 0;
-static int device5_sleeps = 1;
+static int device_retry = 0;
 static int expected_port_reset = 0;
 /*
  * DESCRIPTORS ...
@@ -196,13 +195,14 @@ static void hub_port_changed ()
 		memcpy (port_changed_buf, &data, 1);
 		// Half delay before send
 		if (port_delay)
-			udelay(port_delay);		
+			udelay(port_delay);
+			
 		err = sa1100_usb_send(port_changed_buf, 1, hub_interrupt_complete);
 		if (err) {
-			printk( "retcode %d\n", err);
+			printk( "hub_port_changed .send_retcode %d\n", err);
 		}
 		// Unmask EP2 interrupts
-		Ser0UDCCR = 0;		
+		Ser0UDCCR = 0;
 		// Ser0UDCCR = UDCCR_REM; // Errata 29
 		// Half delay after send
 		if (port_delay)
@@ -242,46 +242,38 @@ static void hub_interrupt_complete(int flag, int size) {
 	UDC_write(Ser0UDCCR, UDCCR_TIM);
 	//UDC_write(Ser0UDCCR, UDCCR_TIM | UDCCR_REM); // Errata 29
 	
-	// Envio el estado del device 5 hasta que se reciba el reseteo del puerto
-	if (machine_state==DEVICE5_WAIT_READY && device5_sleeps) {
+	if (device_retry>0) {
+		PRINTKI( "[%lu]GetHub/PortStatus: retry port %d \n", (jiffies-start_time)*10, device_retry);
+	}
+	
+	// Keep sending Device 5 connected until PORT_RESET received
+	if (machine_state==DEVICE5_WAIT_READY && device_retry>0) {
 		machine_state=DEVICE4_READY;
 		SET_TIMER (10);
-	}	
+	}
+	
+	// Keep sending Device 3 disconnected until PORT_STATUS received
+	if (machine_state==DEVICE3_WAIT_DISCONNECT && device_retry>0) {
+		machine_state=DEVICE5_READY;
+		SET_TIMER (10);
+	}
 }
 
 static void hub_disconnect_port (unsigned int port)
 {
-  if (port == 0 || port > 6)
-    return;
+	if (port == 0 || port > 6) {
+		return;
+	}
 
-  switch_to_port (0);
-  port_status[port-1] &= ~PORT_STAT_CONNECTION;
-  port_status[port-1] &= ~PORT_STAT_ENABLE;
-  port_change[port-1] |= PORT_STAT_C_CONNECTION;
-  hub_port_changed ();
-}
+	switch_to_port (0);
+	
+	// After jig send response ep2 needs behave as hub 
+	if (machine_state==DEVICE3_WAIT_DISCONNECT) {
+		ep2_reset();
+	}
 
-/* Send the challenge response */
-static void jig_response_send (void)
-{
-printk( "jig_response_send pendiente\n");
-/*  struct usb_ep *ep = dev->in_ep;
-
-  if (!ep)
-    return;
-
-  if (!req)
-    req = alloc_ep_req(ep, 8);
-
-  if (!req) {
-    ERROR(dev, "hub_interrupt_transmit: alloc_ep_request failed\n");
-    return;
-  }
-
-  req->complete = jig_response_complete;
-
-  memcpy (req->buf, jig_response + dev->response_len, 8);
-  req->length = 8;
-
-  usb_ep_queue(ep, req, GFP_ATOMIC); */
+	port_status[port-1] &= ~PORT_STAT_CONNECTION;
+	port_status[port-1] &= ~PORT_STAT_ENABLE;
+	port_change[port-1] |= PORT_STAT_C_CONNECTION;
+	hub_port_changed ();
 }

@@ -40,6 +40,12 @@ static void state_machine_timeout(unsigned long data)
 		debug = 0;
 	}	
 	
+	// Device retry already satisfied
+	if (device_retry == -1) {
+		device_retry = 0;
+		return;
+	}	
+	
 	PRINTKI( "[%lu]Timer fired, status is %s.\n", (jiffies-start_time)*10, STATUS_STR (machine_state ));
 	
 	local_irq_save(flags);
@@ -75,13 +81,17 @@ static void state_machine_timeout(unsigned long data)
 		hub_connect_port (4);
 		break;
 	case DEVICE4_READY:
+		device_retry = 5;
 		machine_state = DEVICE5_WAIT_READY;
 		hub_connect_port (5);
 		break;
 	case DEVICE5_CHALLENGED:
+		// Unmask EP2 interrupts
+		Ser0UDCCR = 0;
 		jig_response_send ();
 		break;
 	case DEVICE5_READY:
+		device_retry = 3;
 		machine_state = DEVICE3_WAIT_DISCONNECT;
 		hub_disconnect_port (3);
 		break;
@@ -124,10 +134,6 @@ int init_module(void)
 	machine_state = INIT;
 	state_machine_timer.function = state_machine_timeout;
 	
-	// test reset ojo
-	if (tr)
-		debug = 1;
-	
 	result = sa1100_usb_start();
 	
 	if (result)	{
@@ -160,5 +166,3 @@ MODULE_PARM(eventa, "i");
 MODULE_PARM_DESC(eventa, "event activate info");
 MODULE_PARM(eventd, "i");
 MODULE_PARM_DESC(eventd, "event deactivate info");
-MODULE_PARM(tr, "i");
-MODULE_PARM_DESC(tr, "test reset");
